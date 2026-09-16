@@ -1,6 +1,6 @@
 import asyncio
-import time
 import random
+import time
 
 
 class DummySensorNode:
@@ -18,19 +18,24 @@ class DummySensorNode:
         self._running = True
 
     async def run(self):
+        await asyncio.sleep(3)
         self.logger.info(f"[{self.node_id}] Starting dummy sensor stream at {1/self.interval:.0f}Hz")
         while self._running:
             packet = self._generate_packet()
             await self.queue.put(packet)
-            self.logger.debug(f"[{self.node_id}] seq={packet['sequence']} ts={packet['timestamp']}")
+            self.logger.debug(f"[{self.node_id}] Dummy packet : {packet}")
             await asyncio.sleep(self.interval)
 
     def _generate_packet(self) -> dict:
         self.seq += 1
+        timestamp = time.monotonic_ns() / 1_000_000.0  # timestamp in milliseconds
         return {
             "node": self.node_id,
             "sequence": self.seq,
-            "timestamp": time.time() * 1000,  # ms
+            # dummy source already uses laptop monotonic clock, so no need to adjust for clock offset
+            "timestamp": timestamp,
+            "raw_timestamp": timestamp,
+            "common_timestamp": timestamp,
             "acceleration": {
                 "x": round(random.uniform(-2, 2), 2),
                 "y": round(random.uniform(-2, 2), 2),

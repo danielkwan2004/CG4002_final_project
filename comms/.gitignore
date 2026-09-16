@@ -1,6 +1,5 @@
 # Logs
-logs/*.log
-laptop/logs/*.log
+*.log
 
 # Python
 **/__pycache__/

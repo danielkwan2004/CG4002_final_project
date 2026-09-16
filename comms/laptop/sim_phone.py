@@ -1,19 +1,33 @@
 import argparse
+import os
+from dotenv import load_dotenv
 from mqtt_client import MQTTClientWrapper
 from logger_setup import get_logger
-from constants import PORT_WSS, TOPIC_SENSOR, TOPIC_RESULTS, TRANSPORT_WSS, CA_CERTS_PATH
+from constants import (
+    PORT_WSS, 
+    TOPIC_SENSOR, 
+    TOPIC_RESULTS, 
+    TRANSPORT_WSS, 
+    CA_CERTS_PATH
+)
+
+load_dotenv()
+USER_PHONE = os.getenv("USER_PHONE")
+PW_PHONE = os.getenv("PW_PHONE")
 
 parser = argparse.ArgumentParser()
 parser.add_argument("-v", "--verbose", action="store_true")
 args = parser.parse_args()
 
-logger = get_logger("sim_phone", verbose=args.verbose)
+logger = get_logger("sim_phone", verbose=args.verbose, log_dir="logs/sim_phone")
 
 client = MQTTClientWrapper(
     client_id="sim_phone",
     port=PORT_WSS,
     transport=TRANSPORT_WSS,
     ca_certs=CA_CERTS_PATH,
+    username=USER_PHONE,
+    password=PW_PHONE,
     logger=logger
 )
 

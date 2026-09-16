@@ -1,11 +1,20 @@
 import asyncio
 import argparse
-from dummy_sensor_source import DummySensorNode
+import json
+import os
+from dotenv import load_dotenv
+from ble_sensor_node import BLESensorNode
+from dummy_sensor_node import DummySensorNode
 from synchroniser import Synchroniser
 from mqtt_client import MQTTClientWrapper
 from logger_setup import get_logger
-from constants import PORT_TLS, TRANSPORT_TLS, TOPIC_SENSOR, CA_CERTS_PATH
+from constants import PORT_TLS, TRANSPORT_TLS, TOPIC_SENSOR, TOPIC_HAPTICS, CA_CERTS_PATH
 
+load_dotenv()
+USER_LAPTOP_CLI = os.getenv("USER_LAPTOP_CLI")
+PW_LAPTOP_CLI = os.getenv("PW_LAPTOP_CLI")
+
+main_loop = None
 
 async def publisher_task(output_queue: asyncio.Queue, mqtt_client: MQTTClientWrapper, logger):
     while True:
@@ -13,33 +22,60 @@ async def publisher_task(output_queue: asyncio.Queue, mqtt_client: MQTTClientWra
         mqtt_client.publish(TOPIC_SENSOR, paired_sample, qos=0)
         logger.debug(f"Published synchronised sample ts={paired_sample['timestamp']}")
 
-
+async def stats_task(sync: Synchroniser, logger, interval: float = 5.0):
+    while True:
+        await asyncio.sleep(interval)
+        logger.info(f"[SYNC STATS] {sync.stats()}")
+        
 async def main(verbose: bool):
-    logger = get_logger("laptop", verbose=verbose)
+    logger = get_logger("laptop", verbose=verbose, log_dir="logs/laptop")
+
+    global main_loop
+    main_loop = asyncio.get_running_loop()
 
     forearm_queue = asyncio.Queue()
     paddle_queue = asyncio.Queue()
     output_queue = asyncio.Queue()
 
-    forearm_node = DummySensorNode("forearm", forearm_queue, logger)
-    paddle_node = DummySensorNode("paddle", paddle_queue, logger)
+    forearm_node = BLESensorNode("forearm", forearm_queue, logger)
+    paddle_node = DummySensorNode("paddle", paddle_queue, logger)  # Using dummy node for testing
     sync = Synchroniser(forearm_queue, paddle_queue, output_queue, logger)
 
     mqtt_client = MQTTClientWrapper(
-        client_id="laptop_gateway",
+        client_id="laptop_cli",
         port=PORT_TLS,
         transport=TRANSPORT_TLS,
         ca_certs=CA_CERTS_PATH,
+        username=USER_LAPTOP_CLI,
+        password=PW_LAPTOP_CLI,
         logger=logger,
     )
     mqtt_client.loop_start()  # runs on its own background thread
 
-    await asyncio.gather(
-        forearm_node.run(),
-        paddle_node.run(),
-        sync.run(),
-        publisher_task(output_queue, mqtt_client, logger),
-    )
+    def handle_haptic_command(msg):
+        payload = json.loads(msg.payload.decode())
+        haptic_json = json.dumps(payload, separators=(",", ":"))
+        logger.info(f"Received haptic command: {haptic_json}")
+        asyncio.run_coroutine_threadsafe(forearm_node.send_haptic(haptic_json), main_loop)
+
+    mqtt_client.subscribe(TOPIC_HAPTICS, callback=handle_haptic_command, qos=1)
+
+    tasks = [
+        asyncio.create_task(forearm_node.run()),
+        asyncio.create_task(paddle_node.run()),
+        asyncio.create_task(sync.run()),
+        asyncio.create_task(publisher_task(output_queue, mqtt_client, logger)),
+        asyncio.create_task(stats_task(sync, logger)),
+    ]
+    try:
+        await asyncio.gather(*tasks)
+    except asyncio.CancelledError:
+        logger.info("Shutting down, cancelling tasks...")
+    finally:
+        for t in tasks:
+            t.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        mqtt_client.loop_stop()
 
 
 if __name__ == "__main__":
@@ -50,4 +86,4 @@ if __name__ == "__main__":
     try:
         asyncio.run(main(args.verbose))
     except KeyboardInterrupt:
-        print("\nShutting down...")
+        print("\nInterrupted - Shutting down...")

@@ -17,6 +17,8 @@ class MQTTClientWrapper:
             port: int = PORT_TLS,
             transport: str = TRANSPORT_TLS, 
             ca_certs: str = CA_CERTS_PATH,
+            username: str = None,
+            password: str = None,
             lwt_topic: str = None,
             lwt_payload: str = None,
             logger=None
@@ -38,6 +40,9 @@ class MQTTClientWrapper:
             ca_certs=ca_certs, 
             tls_version=ssl.PROTOCOL_TLS_CLIENT
         )
+
+        if username and password:
+            self.client.username_pw_set(username, password)
 
         if lwt_topic and lwt_payload:
             self.client.will_set(lwt_topic, payload=lwt_payload, qos=1, retain=False)
