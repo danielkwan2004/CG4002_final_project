@@ -1,19 +1,22 @@
 import argparse
 import os
 import time
+
+from constants import (
+    CA_CERTS_PATH, 
+    HAPTIC_MIN_INTERVAL_SECONDS,
+    PKT_AI_RESULTS, 
+    PKT_HAPTIC_CMD,
+    PORT_TLS, 
+    TOPIC_HAPTICS, 
+    TOPIC_RESULTS, 
+    TOPIC_SENSOR, 
+    TRANSPORT_TLS, 
+)
 from dotenv import load_dotenv
 from mqtt_client import MQTTClientWrapper
 from logger_setup import get_logger
-from constants import (
-    PORT_TLS, 
-    TOPIC_SENSOR, 
-    TOPIC_RESULTS, 
-    TOPIC_HAPTICS, 
-    TRANSPORT_TLS, 
-    CA_CERTS_PATH, 
-    PKT_AI_RESULTS, 
-    PKT_HAPTIC_CMD
-)
+
 
 load_dotenv()
 USER_ULTRA96 = os.getenv("USER_ULTRA96")
@@ -38,9 +41,11 @@ client = MQTTClientWrapper(
 )
 
 packet_count = 0
+haptic_count = 0
+last_haptic_time = float("-inf")
 
 def handle_sensor_data(msg):
-    global packet_count
+    global packet_count, last_haptic_time
     packet_count += 1
     logger.info(f"Received sensor packet #{packet_count}: ({len(msg.payload)} bytes)")
 
@@ -53,12 +58,24 @@ def handle_sensor_data(msg):
         "confidence": 0.93
     }, qos=1)
 
-    if packet_count % 10 == 0:
+    now = time.monotonic()
+    haptic_due = now - last_haptic_time >= HAPTIC_MIN_INTERVAL_SECONDS
+    if packet_count % 10 == 0 and haptic_due:
+        haptic_count += 1
         client.publish(TOPIC_HAPTICS, {
             "type": PKT_HAPTIC_CMD,
+            "id": haptic_count,
             "timestamp": int(time.time() * 1000),
             "pattern": "double_pulse"
         }, qos=1)
+        last_haptic_time = now
+        logger.info(f"Published haptic packet #{haptic_count}")
 
 client.subscribe(TOPIC_SENSOR, callback=handle_sensor_data, qos=0)
-client.loop_forever()
+
+try:
+    client.loop_forever()
+except KeyboardInterrupt:
+    logger.info("Interrupted - disconnecting from MQTT")
+finally:
+    client.disconnect()

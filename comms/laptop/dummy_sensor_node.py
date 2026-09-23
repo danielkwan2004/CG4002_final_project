@@ -28,7 +28,7 @@ class DummySensorNode:
 
     def _generate_packet(self) -> dict:
         self.seq += 1
-        timestamp = time.monotonic_ns() / 1_000_000.0  # timestamp in milliseconds
+        timestamp = time.monotonic_ns() / 1e6  # timestamp in milliseconds
         return {
             "node": self.node_id,
             "sequence": self.seq,

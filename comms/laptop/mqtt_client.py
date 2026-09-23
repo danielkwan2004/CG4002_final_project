@@ -101,4 +101,7 @@ class MQTTClientWrapper:
 
     def loop_stop(self):
         self.client.loop_stop()
+        self.disconnect()
+
+    def disconnect(self):
         self.client.disconnect()

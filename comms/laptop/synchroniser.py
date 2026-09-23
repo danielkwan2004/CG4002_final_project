@@ -8,12 +8,12 @@ class Synchroniser:
 
     def __init__(
         self, 
-        forearm_queue, 
-        paddle_queue, 
-        output_queue, 
+        forearm_queue,
+        paddle_queue,
+        output_queue,
         logger,
-        tolerance_ms=2.5,      # 2.5ms
-        buffer_window_ms=50.0  # 50ms
+        tolerance_ms=2.5,
+        buffer_window_ms=50.0
     ):
         self.forearm_queue = forearm_queue
         self.paddle_queue = paddle_queue
@@ -34,7 +34,7 @@ class Synchroniser:
 
     async def run(self):
         self.logger.info(
-            f"Synchroniser started: tolerance={self.tolerance_ms}ms, "
+            f"FireBeetle synchroniser started: tolerance={self.tolerance_ms}ms, "
             f"window={self.buffer_window_ms}ms"
         )
         forearm_get = asyncio.create_task(self.forearm_queue.get())
@@ -107,11 +107,13 @@ class Synchroniser:
         total = self.matched_count + self.unmatched_forearm
         return {
             "matched": self.matched_count,
-            "unmatched_forearm": self.unmatched_forearm,
-            "unmatched_paddle": self.unmatched_paddle,
             "match_rate_percent": (
                 100.0 * self.matched_count / total if total else 0.0
             ),
+            "received_forearm": self.matched_count + self.unmatched_forearm,
+            "received_paddle": self.matched_count + self.unmatched_paddle,
+            "unmatched_forearm": self.unmatched_forearm,
+            "unmatched_paddle": self.unmatched_paddle,
             "forearm_buffer": len(self.forearm_buffer),
             "paddle_buffer": len(self.paddle_buffer),
         }

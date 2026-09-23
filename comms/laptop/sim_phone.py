@@ -1,15 +1,17 @@
 import argparse
 import os
+
+from constants import (
+    CA_CERTS_PATH,
+    PORT_WSS, 
+    TOPIC_RESULTS, 
+    TOPIC_SENSOR, 
+    TRANSPORT_WSS
+)
 from dotenv import load_dotenv
 from mqtt_client import MQTTClientWrapper
 from logger_setup import get_logger
-from constants import (
-    PORT_WSS, 
-    TOPIC_SENSOR, 
-    TOPIC_RESULTS, 
-    TRANSPORT_WSS, 
-    CA_CERTS_PATH
-)
+
 
 load_dotenv()
 USER_PHONE = os.getenv("USER_PHONE")
