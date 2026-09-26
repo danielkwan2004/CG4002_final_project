@@ -1,7 +1,8 @@
 import ssl
 import json
 import paho.mqtt.client as mqtt
-from constants import BROKER_HOST, PORT_TLS, TRANSPORT_TLS, CA_CERTS_PATH
+from constants import (BROKER_HOST, PORT_TLS, TRANSPORT_TLS, CA_CERTS_PATH,
+                       TOPIC_SENSOR, TOPIC_RELAY, TOPIC_RESULTS, TOPIC_HAPTICS)
 
 
 class MQTTClientWrapper: 
@@ -55,24 +56,32 @@ class MQTTClientWrapper:
         self._message_callbacks = {}  # topic -> callback function
         self._pending_subscriptions = [] # (topic, qos) tuples to subscribe once connected
 
-    def _log(self, level, msg):
+    def _log(self, level, msg, device=None):
         if self.logger:
-            getattr(self.logger, level)(msg)
+            extra = {"device": device} if device else {}
+            getattr(self.logger, level)(msg, extra=extra)
         else:
             print(msg)
 
     def _on_connect(self, client, userdata, flags, rc, properties=None):
-        self._log("info", f"[{self.client_id}] Connected to {self.host}:{self.port} - {rc}")
+        self._log("info", f"Connected to {self.host}:{self.port} - {rc}")
 
         for topic, qos in self._pending_subscriptions:
             self.client.subscribe(topic, qos=qos)
-            self._log("info", f"[{self.client_id}] Subscribed to {topic} (QoS {qos})")
 
     def _on_disconnect(self, client, userdata, disconnect_flags, rc, properties=None):
-        self._log("warning", f"[{self.client_id}] Disconnected from {self.host}:{self.port} - {rc}")
+        self._log("info" if rc == 0 else "warning", f"Disconnected from {self.host}:{self.port} - {rc}")
 
     def _on_message(self, client, userdata, msg): 
-        self._log("debug", f"[{self.client_id}] {msg.topic}: {msg.payload.decode()}")
+        # Source follows this application's topic contract, not words in JSON.
+        source = {
+            TOPIC_SENSOR: "laptop", TOPIC_RELAY: "laptop",
+            TOPIC_RESULTS: "ultra96", TOPIC_HAPTICS: "ultra96",
+        }.get(msg.topic)
+
+        self._log("debug", f"[MQTT -> {self.client_id.upper()}] {msg.topic}: "
+                  f"{msg.payload.decode(errors='replace')}", device=source)
+        
         if msg.topic in self._message_callbacks:
             self._message_callbacks[msg.topic](msg)
 
@@ -80,13 +89,13 @@ class MQTTClientWrapper:
         self.client.subscribe(topic, qos=qos)
         if callback:
             self._message_callbacks[topic] = callback
-            self._log("info", f"[{self.client_id}] Subscribed to {topic} (Qos {qos})")
+            self._log("info", f"Subscribed to {topic} (Qos {qos})")
         self._pending_subscriptions.append((topic, qos))
 
     def publish(self, topic: str, payload: dict, qos: int = 0):
         payload_str = json.dumps(payload)
         self.client.publish(topic, payload_str, qos=qos)
-        self._log("debug", f"[{self.client_id}] Published to {topic}: {payload_str}")
+        self._log("debug", f"Published to {topic}: {payload_str}")
 
     def connect(self):
         self.client.connect(self.host, self.port)

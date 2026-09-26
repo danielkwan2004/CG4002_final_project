@@ -1,6 +1,21 @@
 import asyncio
+import uuid
 from collections import deque
 from constants import PKT_SENSOR_DATA
+
+
+def paired_sensor_packet(forearm, paddle, sensor_seq, session_id):
+    """Shared payload for continuous and keyboard-triggered sensor pairs."""
+    return {
+        "type": PKT_SENSOR_DATA,
+        "sensor_seq": sensor_seq,
+        "session_id": session_id,
+        "timestamp": int(round(min(forearm["common_timestamp"], paddle["common_timestamp"]))),
+        "forearm_seq": forearm["sequence"],
+        "paddle_seq": paddle["sequence"],
+        "forearm": {k: forearm[k] for k in ("acceleration", "gyroscope")},
+        "paddle": {k: paddle[k] for k in ("acceleration", "gyroscope")},
+    }
 
 
 class Synchroniser:
@@ -25,6 +40,7 @@ class Synchroniser:
         self.forearm_buffer = deque(maxlen=self.max_buffer_len)
         self.paddle_buffer = deque(maxlen=self.max_buffer_len)
         self.matched_count = 0
+        self.session_id = uuid.uuid4().hex
         self.unmatched_forearm = 0
         self.unmatched_paddle = 0
 
@@ -33,9 +49,9 @@ class Synchroniser:
         return float(sample.get("common_timestamp"))
 
     async def run(self):
-        self.logger.info(
-            f"FireBeetle synchroniser started: tolerance={self.tolerance_ms}ms, "
-            f"window={self.buffer_window_ms}ms"
+        self.logger.debug(
+            f"FireBeetle synchroniser waiting for samples: tolerance = {self.tolerance_ms}ms, "
+            f"window = {self.buffer_window_ms}ms"
         )
         forearm_get = asyncio.create_task(self.forearm_queue.get())
         paddle_get = asyncio.create_task(self.paddle_queue.get())
@@ -78,21 +94,13 @@ class Synchroniser:
                 del search_buffer[index]
                 forearm_sample = anchor if anchor_is_forearm else match
                 paddle_sample = match if anchor_is_forearm else anchor
-                await self.output_queue.put({
-                    "type": PKT_SENSOR_DATA,
-                    "timestamp": int(round(target)),
-                    "forearm_seq": forearm_sample.get("sequence"),
-                    "paddle_seq": paddle_sample.get("sequence"),
-                    "forearm": {
-                        "acceleration": forearm_sample["acceleration"],
-                        "gyroscope": forearm_sample["gyroscope"],
-                    },
-                    "paddle": {
-                        "acceleration": paddle_sample["acceleration"],
-                        "gyroscope": paddle_sample["gyroscope"],
-                    },
-                })
+                await self.output_queue.put(paired_sensor_packet(forearm_sample, paddle_sample, self.matched_count + 1, self.session_id))
                 self.matched_count += 1
+                if self.matched_count == 1:
+                    self.logger.info(
+                        f"Synchroniser pairing begun: first forearm + paddle pair "
+                        f"(timestamp difference = {diff:.2f}ms, tolerance = {self.tolerance_ms}ms)"
+                    )
                 continue
 
             # no match close enough — evict whichever side is stale

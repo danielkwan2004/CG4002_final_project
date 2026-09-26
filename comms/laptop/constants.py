@@ -1,4 +1,4 @@
-BROKER_HOST = "localhost"
+BROKER_HOST = "Venices-MacBook-Air.local"
 
 PORT_TLS = 8883
 PORT_WSS = 9001
@@ -10,30 +10,49 @@ TRANSPORT_WSS = "websockets"
 TOPIC_SENSOR  = "fb/sensor/raw"
 TOPIC_RESULTS = "ultra96/ai/results"
 TOPIC_HAPTICS = "ultra96/ai/haptics"
+TOPIC_RELAY   = "fb/relay/dummy"
 
+STROKES = ["forehand", "backhand", "overhead stroke", "overhead smash", 
+           "underhand short arch", "underhand long arch"]
+
+# BLE connection setup
 PKT_HELLO_REQ       = 0x01
 PKT_HELLO           = 0x02
 PKT_CONFIG          = 0x03
 PKT_CONFIG_ACK      = 0x04
-PKT_SYNC_REQ        = 0x05
-PKT_SYNC_RESP       = 0x06
-PKT_SENSOR_BATCH    = 0x07
-PKT_HAPTIC_CMD      = 0x08
-PKT_HAPTIC_RESP     = 0x09
-PKT_SYNC_START      = 0x0A
-PKT_SYNC_END        = 0x0B
-PKT_AI_RESULTS      = 0x0C
-PKT_FILE_REQ        = 0x0D
-PKT_FILE_META       = 0x0E
-PKT_FILE_CHUNK      = 0x0F
-PKT_FILE_CHUNK_REQ  = 0x10
-PKT_FILE_RESULT     = 0x12
-PKT_SENSOR_DATA     = "sensor_data"
+
+# BLE clock synchronisation and stream pause/resume
+PKT_SYNC_START      = 0x05
+PKT_SYNC_REQ        = 0x06
+PKT_SYNC_RESP       = 0x07
+PKT_SYNC_END        = 0x08
+
+# Sensor data: FireBeetle binary batch, then laptop paired MQTT sample
+PKT_SENSOR_BATCH    = 0x09
+PKT_SENSOR_DATA     = 0x0A
+
+# Ultra96 inference output and haptic feedback
+PKT_AI_RESULTS      = 0x0B
+PKT_HAPTIC_CMD      = 0x0C
+PKT_HAPTIC_RESP     = 0x0D
+
+# Keyboard mode: BLE trigger, legacy reply, and paired MQTT batch envelope
+PKT_DUMMY           = 0x0E
+PKT_DUMMY_REPLY     = 0x0F
+PKT_DUMMY_BATCH     = 0x10
+
+# BLE file transfer
+PKT_FILE_REQ        = 0x11
+PKT_FILE_META       = 0x12
+PKT_FILE_CHUNK      = 0x13
+PKT_FILE_CHUNK_REQ  = 0x14
+PKT_FILE_RESULT     = 0x15
 
 SENSOR_BATCH_SIZE = 5
 MAX_SYNC_RTT_MS = 50.0
 BLE_WRITE_TIMEOUT_SECONDS = 1.0
-HAPTIC_MIN_INTERVAL_SECONDS = 1.0
+HAPTIC_MIN_INTERVAL_SECONDS = 10.0
+HAPTIC_RESULTS_PER_TRIGGER = 10
 
 CA_CERTS_PATH = "../broker/certs/ca.crt"
 

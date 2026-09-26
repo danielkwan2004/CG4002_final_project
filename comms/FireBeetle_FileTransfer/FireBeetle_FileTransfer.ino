@@ -16,11 +16,11 @@ const char DEMO_FILE_PATTERN[] =
     "FireBeetle BLE file-transfer throughput test 0123456789abcdef\n";
 
 enum PacketType : uint8_t {
-    PKT_FILE_REQ       = 0x0D,
-    PKT_FILE_META      = 0x0E,
-    PKT_FILE_CHUNK     = 0x0F,
-    PKT_FILE_CHUNK_REQ = 0x10,
-    PKT_FILE_RESULT    = 0x12,
+    PKT_FILE_REQ       = 0x11,
+    PKT_FILE_META      = 0x12,
+    PKT_FILE_CHUNK     = 0x13,
+    PKT_FILE_CHUNK_REQ = 0x14,
+    PKT_FILE_RESULT    = 0x15,
 };
 
 // ATT MTU 185 allows up to 182 bytes of notification data.

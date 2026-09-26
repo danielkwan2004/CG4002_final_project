@@ -5,20 +5,26 @@
 #define NOTIFY_CHAR_UUID    "2F752BBE-B112-4F11-9789-093262B39116"
 #define WRITE_CHAR_UUID     "A9A6FB55-B997-4A3B-A9FA-D97C1E23DB5F"
 
-#define NODE_ID "paddle" // "forearm" or "paddle"
+#define NODE_ID "forearm" // "forearm" or "paddle"
 
 enum PacketType : uint8_t {
     PKT_HELLO_REQ    = 0x01,
     PKT_HELLO        = 0x02,
     PKT_CONFIG       = 0x03,
     PKT_CONFIG_ACK   = 0x04,
-    PKT_SYNC_REQ     = 0x05,
-    PKT_SYNC_RESP    = 0x06,
-    PKT_SENSOR_BATCH = 0x07,
-    PKT_HAPTIC_CMD   = 0x08,
-    PKT_HAPTIC_RESP  = 0X09,
-    PKT_SYNC_START   = 0x0A,
-    PKT_SYNC_END     = 0x0B,
+
+    PKT_SYNC_START   = 0x05,
+    PKT_SYNC_REQ     = 0x06,
+    PKT_SYNC_RESP    = 0x07,
+    PKT_SYNC_END     = 0x08,
+
+    PKT_SENSOR_BATCH = 0x09,
+
+    PKT_HAPTIC_CMD   = 0x0C,
+    PKT_HAPTIC_RESP  = 0X0D,
+
+    PKT_DUMMY        = 0x0E,
+    PKT_DUMMY_REPLY  = 0x0F,
 };
 
 constexpr uint8_t SENSOR_BATCH_SIZE = 5;
@@ -134,6 +140,23 @@ class WriteCallback : public NimBLECharacteristicCallbacks {
         else if (type == PKT_SYNC_END) {
             streamingPaused = false;
             state = SYNCHRONISED;
+        }
+        else if (type == PKT_DUMMY) {
+            SensorBatchPayload dummyPkt;
+            dummyPkt.count = 1;
+            SensorSample& sample = dummyPkt.samples[0];
+            sample.sequence = doc["sequence"] | 0U;
+            sample.timestamp = millis();
+            sample.accel[0] = 1.0f;
+            sample.accel[1] = 0.5f;
+            sample.accel[2] = 9.8f;
+            sample.gyro[0] = 0.0f;
+            sample.gyro[1] = 0.0f;
+            sample.gyro[2] = 0.0f;
+            if (!notifyChar->notify(reinterpret_cast<uint8_t*>(&dummyPkt),
+                                    2 + sizeof(SensorSample))) {
+                Serial.println("Triggered sample notification failed");
+            }
         }
 
         // only forearm node receives
@@ -260,7 +283,7 @@ void loop() {
         notifyChar->notify();
         Serial.println("Sent HAPTIC_RESP");
     }
-    
+
     // 5. Sample at 200Hz and batch five samples into each BLE notification.
     static uint32_t lastSample = 0;
     uint32_t interval = 1000 / configuredSampleRate;
@@ -281,10 +304,12 @@ void loop() {
         sensorBatch.count++;
 
         if (sensorBatch.count == SENSOR_BATCH_SIZE) {
-            const size_t payloadLength =
-                2 + sensorBatch.count * sizeof(SensorSample);
-            notifyChar->setValue((uint8_t*)&sensorBatch, payloadLength);
-            if (!notifyChar->notify()) {
+            const size_t payloadLength = 2 + sensorBatch.count * sizeof(SensorSample);
+
+            if (!notifyChar->notify(
+                    reinterpret_cast<uint8_t*>(&sensorBatch),
+                    payloadLength
+                )) {
                 Serial.println("Sensor batch notification failed");
             }
             sensorBatch.count = 0;
