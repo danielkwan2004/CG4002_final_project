@@ -8,6 +8,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
+using UnityEngine.UI;
 using MQTTnet;
 using MQTTnet.Client;
 using MQTTnet.Protocol;
@@ -16,10 +17,10 @@ using TMPro;
 public class PickleVizMqttClient : MonoBehaviour
 {
     [Header("Broker settings")]
-    public string brokerHost = "192.168.0.156";
+    public string brokerHost = "";
     public int brokerPort = 8883;
-    public string mqttUsername = "phone";
-    public string mqttPassword = "phone_pw";
+    private string mqttUsername = "";
+    private string mqttPassword = "";
 
     [Header("Diagnostics")]
     public bool runTcpProbe = true;
@@ -60,15 +61,104 @@ public class PickleVizMqttClient : MonoBehaviour
     private volatile bool connecting;
     private X509Certificate2 caCertificate;
     private CancellationTokenSource connectionLifetime;
+    private Task connectionTask = Task.CompletedTask;
+    private bool stopping;
+    private bool changingAddress;
+    private const string BrokerHostKey = "PickleViz.BrokerHost";
+    private const string UsernameKey = "PickleViz.Username";
+    [SerializeField] private TMP_InputField usernameInput;
+    [SerializeField] private TMP_InputField passwordInput;
+    [SerializeField] private TMP_InputField brokerInput;
+    [SerializeField] private Button connectButton;
+    [SerializeField] private TMP_Text addressHint;
+
     private long mqttBytes;
     private float statsStarted;
     private float mqttKbps;
 
-    private async void Start()
+    private void Start()
     {
         statsStarted = Time.realtimeSinceStartup;
+        brokerHost = PlayerPrefs.GetString(BrokerHostKey, brokerHost);
+        mqttUsername = PlayerPrefs.GetString(UsernameKey, "");
+        if (brokerInput == null || usernameInput == null || passwordInput == null ||
+            connectButton == null || addressHint == null)
+        {
+            connectionStatus = "Login UI references are missing. Assign them on MqttManager.";
+            Debug.LogError(connectionStatus, this);
+            return;
+        }
+        brokerInput.text = brokerHost;
+        brokerInput.keyboardType = TouchScreenKeyboardType.URL;
+        brokerInput.characterLimit = 253;
+        usernameInput.text = mqttUsername;
+        passwordInput.contentType = TMP_InputField.ContentType.Password;
+        passwordInput.text = "";
+        addressHint.text = $"TLS port {brokerPort} - enter your login details";
+        connectButton.onClick.AddListener(ApplyBrokerAddress);
+        connectionStatus = "Enter MQTT login details and click Connect.";
+    }
+
+    private void StartConnectionLoop()
+    {
         connectionLifetime = new CancellationTokenSource();
-        await RunConnectionLoopAsync(connectionLifetime.Token);
+        connectionTask = RunConnectionLoopAsync(connectionLifetime.Token);
+    }
+
+    private async void ApplyBrokerAddress()
+    {
+        if (changingAddress || stopping) return;
+        string host = brokerInput.text.Trim();
+        if (string.IsNullOrEmpty(host) || Uri.CheckHostName(host) == UriHostNameType.Unknown)
+        {
+            addressHint.text = "Enter an IP address or hostname, without a port or http://.";
+            return;
+        }
+
+        string username = usernameInput.text.Trim();
+        string password = passwordInput.text; // Preserve spaces in passwords.
+        if (string.IsNullOrEmpty(username) || string.IsNullOrEmpty(password))
+        {
+            addressHint.text = "Enter your MQTT username and password.";
+            return;
+        }
+
+        changingAddress = true;
+        connectButton.interactable = false;
+        brokerInput.interactable = false;
+        usernameInput.interactable = passwordInput.interactable = false;
+        addressHint.text = "Switching broker...";
+        try
+        {
+            // Wait for the old loop and its callbacks to finish before changing shared state.
+            connectionLifetime?.Cancel();
+            await connectionTask;
+            if (stopping) return;
+            brokerHost = host;
+            mqttUsername = username;
+            mqttPassword = password;
+            PlayerPrefs.SetString(UsernameKey, username);
+            PlayerPrefs.SetString(BrokerHostKey, host);
+            PlayerPrefs.Save();
+            brokerInput.text = host;
+            addressHint.text = $"Last saved broker: \n{host}:{brokerPort}";
+            StartConnectionLoop();
+        }
+        catch (Exception exception)
+        {
+            if (!stopping) addressHint.text = $"Could not change broker: {exception.Message}";
+            Debug.LogException(exception);
+        }
+        finally
+        {
+            changingAddress = false;
+            if (!stopping)
+            {
+                connectButton.interactable = true;
+                brokerInput.interactable = true;
+                usernameInput.interactable = passwordInput.interactable = true;
+            }
+        }
     }
 
     private async Task RunConnectionLoopAsync(CancellationToken cancellationToken)
@@ -444,11 +534,14 @@ public class PickleVizMqttClient : MonoBehaviour
 
     private void OnApplicationQuit()
     {
+        stopping = true;
         connectionLifetime?.Cancel();
     }
 
     private void OnDestroy()
     {
+        stopping = true;
+        if (connectButton != null) connectButton.onClick.RemoveListener(ApplyBrokerAddress);
         connectionLifetime?.Cancel();
     }
 }
