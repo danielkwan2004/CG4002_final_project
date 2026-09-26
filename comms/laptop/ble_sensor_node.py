@@ -5,7 +5,8 @@ import struct
 import time
 
 from bleak import BleakClient, BleakScanner
-from constants import (
+import _bootstrap
+from utilities.constants import (
     NOTIFY_CHAR_UUID,
     WRITE_CHAR_UUID, 
     SAMPLE_FREQ,

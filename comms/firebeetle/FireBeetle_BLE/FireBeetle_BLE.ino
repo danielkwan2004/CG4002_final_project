@@ -1,3 +1,4 @@
+// Streaming and keyboard-demo firmware.
 #include <NimBLEDevice.h>
 #include <ArduinoJson.h>
 

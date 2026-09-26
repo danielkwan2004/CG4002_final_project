@@ -1,4 +1,4 @@
-import logging 
+import logging
 import sys
 from pathlib import Path
 from datetime import datetime
@@ -12,6 +12,7 @@ DEVICE_COLORS = {
     "PHONE": "\033[96m",    # cyan
 }
 RESET = "\033[0m"
+DEFAULT_LOG_DIR = Path(__file__).resolve().parents[1] / "logs"
 
 
 class DeviceFormatter(logging.Formatter):
@@ -31,10 +32,11 @@ class DeviceFormatter(logging.Formatter):
         return f"{label} {message}"
 
 
-def get_logger(name: str, verbose: bool = False, log_dir: str = "logs") -> logging.Logger:
+def get_logger(name: str, verbose: bool = False, log_dir: str | Path = DEFAULT_LOG_DIR) -> logging.Logger:
     """
     Creates a logger that writes DEBUG-level detail to a timestamped log file,
     and INFO-level (or DEBUG if verbose=True) to the console.
+    The default directory is comms/logs, independent of the working directory.
     """
     logger = logging.getLogger(name)
     logger.setLevel(logging.DEBUG)  # capture everything; handlers filter what's shown

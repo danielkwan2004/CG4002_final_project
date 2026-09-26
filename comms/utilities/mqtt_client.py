@@ -1,7 +1,7 @@
 import ssl
 import json
 import paho.mqtt.client as mqtt
-from constants import (BROKER_HOST, PORT_TLS, TRANSPORT_TLS, CA_CERTS_PATH,
+from .constants import (BROKER_HOST, PORT_TLS, TRANSPORT_TLS, CA_CERTS_PATH,
                        TOPIC_SENSOR, TOPIC_RELAY, TOPIC_RESULTS, TOPIC_HAPTICS)
 
 

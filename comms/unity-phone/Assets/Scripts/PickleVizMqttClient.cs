@@ -40,7 +40,19 @@ public class PickleVizMqttClient : MonoBehaviour
     private int sensorPacketCount = 0;
     private int aiResultCount = 0;
     private string latestSensorPayload = "";
-    private string latestAIResult = "";
+    private string latestAIResultSummary = "";
+
+    // Only display useful fields. JsonUtility ignores session IDs and the
+    // potentially long sensor_seqs array without including them in the UI.
+    [Serializable]
+    private class AIResultDisplayPacket
+    {
+        public long result_seq;
+        public string stroke;
+        public float confidence;
+        public int sample_pairs;
+    }
+    private float lastAIResultTime;
     private volatile bool mqttConnected = false;
     private volatile string connectionStatus = "Starting MQTT...";
     private volatile string connectionStage = "startup";
@@ -339,7 +351,10 @@ public class PickleVizMqttClient : MonoBehaviour
         );
         mqttBytes += Encoding.UTF8.GetByteCount(payload);
 
-        Debug.Log($"Received [{topic}]: {payload}");
+        if (topic == resultTopic)
+            Debug.Log($"Received AI result [{topic}] ({args.ApplicationMessage.PayloadSegment.Count} bytes)");
+        else
+            Debug.Log($"Received [{topic}]: {payload}");
         return Task.CompletedTask;
     }
 
@@ -360,7 +375,8 @@ public class PickleVizMqttClient : MonoBehaviour
             else if (topic == resultTopic)
             {
                 aiResultCount++;
-                latestAIResult = payload;
+                latestAIResultSummary = BuildAIResultSummary(payload);
+                lastAIResultTime = Time.realtimeSinceStartup;
             }
         }
 
@@ -385,8 +401,12 @@ public class PickleVizMqttClient : MonoBehaviour
 
         if (aiResultText)
         {
-            aiResultText.text =
-                $"AI result: " + latestAIResult;
+            // Display stroke names as plain text, even if they contain markup.
+            aiResultText.richText = false;
+            aiResultText.text = aiResultCount == 0
+                ? "AI results: waiting for packets..."
+                : latestAIResultSummary + "\n" +
+                  $"Last packet: {Time.realtimeSinceStartup - lastAIResultTime:F1}s ago";
         }
 
         if (statsText)
@@ -395,6 +415,30 @@ public class PickleVizMqttClient : MonoBehaviour
                 $"Sensor packets: {sensorPacketCount}\n" +
                 $"AI results: {aiResultCount}\n" +
                 $"\nMQTT receive: {mqttKbps:F2} kbps";
+        }
+    }
+
+    private static string BuildAIResultSummary(string payload)
+    {
+        try
+        {
+            var result = JsonUtility.FromJson<AIResultDisplayPacket>(payload);
+            if (result == null || string.IsNullOrWhiteSpace(result.stroke) ||
+                float.IsNaN(result.confidence) ||
+                float.IsInfinity(result.confidence) ||
+                result.confidence < 0f || result.confidence > 1f)
+                return "AI result received: missing or invalid summary fields";
+
+            string stroke = result.stroke.Replace('\r', ' ').Replace('\n', ' ').Replace('\t', ' ');
+            if (stroke.Length > 60) stroke = stroke.Substring(0, 60) + "...";
+            return $"AI result #{result.result_seq}\n" +
+                   $"Stroke: {stroke} | Confidence: {result.confidence * 100f:F0}%\n" +
+                   $"Sample pairs: {result.sample_pairs}";
+        }
+        catch (ArgumentException)
+        {
+            // A malformed packet must not break the Unity Update loop.
+            return "AI result received: invalid JSON";
         }
     }
 

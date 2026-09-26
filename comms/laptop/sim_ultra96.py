@@ -2,7 +2,8 @@ import argparse
 import os
 import time
 
-from constants import (
+import _bootstrap
+from utilities.constants import (
     CA_CERTS_PATH, 
     HAPTIC_MIN_INTERVAL_SECONDS,
     PKT_AI_RESULTS, 
@@ -14,8 +15,8 @@ from constants import (
     TRANSPORT_TLS, 
 )
 from dotenv import load_dotenv
-from mqtt_client import MQTTClientWrapper
-from logger_setup import get_logger
+from utilities.mqtt_client import MQTTClientWrapper
+from utilities.logger_setup import DEFAULT_LOG_DIR, get_logger
 
 
 load_dotenv()
@@ -26,7 +27,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("-v", "--verbose", action="store_true")
 args = parser.parse_args()
 
-logger = get_logger("sim_ultra96", verbose=args.verbose, log_dir="logs/sim_ultra96")
+logger = get_logger("sim_ultra96", verbose=args.verbose, log_dir=DEFAULT_LOG_DIR / "sim_ultra96")
 
 client = MQTTClientWrapper(
     client_id="sim_ultra96",

@@ -1,3 +1,4 @@
+// Standalone file-transfer firmware.
 #include <NimBLEDevice.h>
 #include <ArduinoJson.h>
 #include <LittleFS.h>

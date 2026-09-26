@@ -10,7 +10,8 @@ from pathlib import Path
 
 from bleak import BleakClient, BleakScanner
 
-from constants import (
+import _bootstrap
+from utilities.constants import (
     NOTIFY_CHAR_UUID,
     PKT_FILE_CHUNK,
     PKT_FILE_CHUNK_REQ,

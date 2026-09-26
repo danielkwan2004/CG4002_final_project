@@ -1,7 +1,8 @@
 import asyncio
 import uuid
 from collections import deque
-from constants import PKT_SENSOR_DATA
+import _bootstrap
+from utilities.constants import PKT_SENSOR_DATA
 
 
 def paired_sensor_packet(forearm, paddle, sensor_seq, session_id):

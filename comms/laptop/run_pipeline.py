@@ -8,7 +8,8 @@ import contextlib
 import uuid
 
 from ble_sensor_node import BLESensorNode
-from constants import (
+import _bootstrap
+from utilities.constants import (
     PORT_TLS,
     TRANSPORT_TLS,
     TOPIC_SENSOR,
@@ -20,8 +21,8 @@ from constants import (
 )
 from dotenv import load_dotenv
 from dummy_sensor_node import DummySensorNode
-from logger_setup import get_logger
-from mqtt_client import MQTTClientWrapper
+from utilities.logger_setup import DEFAULT_LOG_DIR, get_logger
+from utilities.mqtt_client import MQTTClientWrapper
 from synchroniser import Synchroniser, paired_sensor_packet
 
 
@@ -160,7 +161,7 @@ async def haptic_worker(haptic_queue: asyncio.Queue, forearm_node: BLESensorNode
             logger.debug("Dropped haptic command because the forearm write failed")
         
 async def main(verbose: bool, clock_resync: bool, keyboard_relay: bool, packets_per_key=5):
-    logger = get_logger("laptop", verbose, log_dir="logs/laptop")
+    logger = get_logger("laptop", verbose, log_dir=DEFAULT_LOG_DIR / "laptop")
 
     main_loop = asyncio.get_running_loop()
 

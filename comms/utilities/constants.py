@@ -1,4 +1,8 @@
-BROKER_HOST = "Venices-MacBook-Air.local"
+import os
+from pathlib import Path
+
+BROKER_HOST = os.getenv("BROKER_HOST", "Venices-MacBook-Air.local")
+CA_CERTS_PATH = os.getenv("CA_CERTS_PATH", str(Path(__file__).resolve().parents[1] / "broker/certs/ca.crt"))
 
 PORT_TLS = 8883
 PORT_WSS = 9001
@@ -53,8 +57,6 @@ MAX_SYNC_RTT_MS = 50.0
 BLE_WRITE_TIMEOUT_SECONDS = 1.0
 HAPTIC_MIN_INTERVAL_SECONDS = 10.0
 HAPTIC_RESULTS_PER_TRIGGER = 10
-
-CA_CERTS_PATH = "../broker/certs/ca.crt"
 
 SERVICE_UUID = "25E2CCC3-D857-49A6-AFDC-F6895F1854B0"
 NOTIFY_CHAR_UUID = "2F752BBE-B112-4F11-9789-093262B39116"

@@ -6,7 +6,8 @@ import random
 import threading
 import uuid
 
-from constants import (
+import _bootstrap
+from utilities.constants import (
     CA_CERTS_PATH,
     HAPTIC_MIN_INTERVAL_SECONDS,
     HAPTIC_RESULTS_PER_TRIGGER,
@@ -23,8 +24,8 @@ from constants import (
     TRANSPORT_TLS,
 )
 from dotenv import load_dotenv
-from logger_setup import get_logger
-from mqtt_client import MQTTClientWrapper
+from utilities.logger_setup import get_logger
+from utilities.mqtt_client import MQTTClientWrapper
 
 
 load_dotenv()
