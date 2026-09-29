@@ -1,0 +1,356 @@
+{
+  "source": "output.txt",
+  "source_line_count": 361,
+  "serial_sample_count": 289,
+  "stats_report_count": 21,
+  "receiver_printed_sample_count": 18,
+  "serial_bursts": [
+    {
+      "start": 4551,
+      "end": 4577,
+      "count": 27,
+      "first_line": 44,
+      "last_line": 72
+    },
+    {
+      "start": 5084,
+      "end": 5187,
+      "count": 104,
+      "first_line": 76,
+      "last_line": 182
+    },
+    {
+      "start": 5638,
+      "end": 5667,
+      "count": 30,
+      "first_line": 185,
+      "last_line": 215
+    },
+    {
+      "start": 6514,
+      "end": 6549,
+      "count": 36,
+      "first_line": 221,
+      "last_line": 258
+    },
+    {
+      "start": 6560,
+      "end": 6623,
+      "count": 64,
+      "first_line": 260,
+      "last_line": 325
+    },
+    {
+      "start": 7097,
+      "end": 7124,
+      "count": 28,
+      "first_line": 328,
+      "last_line": 356
+    }
+  ],
+  "serial_move_events": [
+    {
+      "event": "start",
+      "seq": 4551,
+      "line": 43
+    },
+    {
+      "event": "end",
+      "seq": 4577,
+      "line": 71
+    },
+    {
+      "event": "start",
+      "seq": 5084,
+      "line": 75
+    },
+    {
+      "event": "end",
+      "seq": 5187,
+      "line": 181
+    },
+    {
+      "event": "start",
+      "seq": 5638,
+      "line": 184
+    },
+    {
+      "event": "end",
+      "seq": 5667,
+      "line": 214
+    },
+    {
+      "event": "start",
+      "seq": 6514,
+      "line": 220
+    },
+    {
+      "event": "end",
+      "seq": 6549,
+      "line": 257
+    },
+    {
+      "event": "start",
+      "seq": 6560,
+      "line": 259
+    },
+    {
+      "event": "end",
+      "seq": 6623,
+      "line": 324
+    },
+    {
+      "event": "start",
+      "seq": 7097,
+      "line": 327
+    },
+    {
+      "event": "end",
+      "seq": 7124,
+      "line": 355
+    }
+  ],
+  "receiver_moves_started": 8,
+  "receiver_moves_ended": 8,
+  "receiver_gaps": [
+    {
+      "node": 1,
+      "seq": 921,
+      "accel_filtered": [
+        0.045362,
+        0.381253,
+        0.907823
+      ],
+      "gyro_filtered": [
+        23.939529,
+        10.685523,
+        -30.320076
+      ],
+      "status": 14,
+      "gap_expected": 861,
+      "line": 5
+    },
+    {
+      "node": 1,
+      "seq": 6560,
+      "accel_filtered": [
+        0.45341,
+        -0.095917,
+        0.864024
+      ],
+      "gyro_filtered": [
+        5.349098,
+        -4.681876,
+        40.571774
+      ],
+      "status": 14,
+      "gap_expected": 6550,
+      "line": 30
+    }
+  ],
+  "cross_channel_matches": [
+    {
+      "seq": 4551,
+      "serial_line": 44,
+      "receiver_line": 17,
+      "max_rounding_difference": 4.2999999999793204e-05
+    },
+    {
+      "seq": 5084,
+      "serial_line": 76,
+      "receiver_line": 20,
+      "max_rounding_difference": 4.599999999999049e-05
+    },
+    {
+      "seq": 5133,
+      "serial_line": 126,
+      "receiver_line": 21,
+      "max_rounding_difference": 3.899999999923409e-05
+    },
+    {
+      "seq": 5165,
+      "serial_line": 158,
+      "receiver_line": 22,
+      "max_rounding_difference": 4.599999999999049e-05
+    },
+    {
+      "seq": 5638,
+      "serial_line": 185,
+      "receiver_line": 25,
+      "max_rounding_difference": 2.8000000000028002e-05
+    },
+    {
+      "seq": 6514,
+      "serial_line": 221,
+      "receiver_line": 28,
+      "max_rounding_difference": 4.599999999999743e-05
+    },
+    {
+      "seq": 6545,
+      "serial_line": 253,
+      "receiver_line": 29,
+      "max_rounding_difference": 4.0000000000040004e-05
+    },
+    {
+      "seq": 6560,
+      "serial_line": 260,
+      "receiver_line": 30,
+      "max_rounding_difference": 2.6000000005410584e-05
+    },
+    {
+      "seq": 6591,
+      "serial_line": 291,
+      "receiver_line": 31,
+      "max_rounding_difference": 4.500000000007276e-05
+    },
+    {
+      "seq": 6623,
+      "serial_line": 325,
+      "receiver_line": 32,
+      "max_rounding_difference": 4.8000000000048004e-05
+    },
+    {
+      "seq": 7097,
+      "serial_line": 328,
+      "receiver_line": 35,
+      "max_rounding_difference": 2.6999999999999247e-05
+    }
+  ],
+  "stats_ranges": {
+    "maxProducerJitterUs": {
+      "min": 8112,
+      "max": 22612
+    },
+    "maxQueueLatencyUs": {
+      "min": 14,
+      "max": 45
+    },
+    "maxProcessingUs": {
+      "min": 19,
+      "max": 164
+    },
+    "avgProcessingUs": {
+      "min": 14,
+      "max": 41
+    },
+    "cpuMarginUs": {
+      "min": 4836,
+      "max": 4981
+    },
+    "maxWifiSendUs": {
+      "min": 0,
+      "max": 1476
+    },
+    "avgWifiSendUs": {
+      "min": 0,
+      "max": 960
+    },
+    "dropped": {
+      "min": 0,
+      "max": 0
+    },
+    "sequenceGaps": {
+      "min": 0,
+      "max": 0
+    },
+    "saturatedSamples": {
+      "min": 0,
+      "max": 0
+    }
+  },
+  "status_values": [
+    14
+  ],
+  "buffer_high_water_marks": [
+    "1/256"
+  ],
+  "maximum_z_calibrated": {
+    "seq": 7103,
+    "line": 334,
+    "accel_raw": [
+      -3450.0,
+      3701.0,
+      16823.0
+    ],
+    "accel_cal": [
+      -1.6905,
+      1.7237,
+      8.2128
+    ],
+    "accel_filtered": [
+      -0.2852,
+      0.2824,
+      1.8289
+    ],
+    "gyro_raw": [
+      -3029.0,
+      -2708.0,
+      163.0
+    ],
+    "gyro_corrected": [
+      -184.8469512195122,
+      -164.46036585365854,
+      9.796951219512195
+    ],
+    "gyro_filtered": [
+      -69.0936,
+      35.16,
+      -16.58
+    ],
+    "status": 14,
+    "chars": 182
+  },
+  "final_row": {
+    "seq": 7124,
+    "line": 356,
+    "accel_raw": [
+      12.0,
+      182.0,
+      2044.0
+    ],
+    "accel_cal": [
+      -0.0001,
+      0.0054,
+      0.9965
+    ],
+    "accel_filtered": [
+      -0.0002,
+      0.0088,
+      1.0056
+    ],
+    "gyro_raw": [
+      3.0,
+      -11.0,
+      3.0
+    ],
+    "gyro_corrected": [
+      0.03109756097560976,
+      -0.009146341463414635,
+      0.040853658536585374
+    ],
+    "gyro_filtered": [
+      -1.0167,
+      -0.2741,
+      0.8618
+    ],
+    "status": 14,
+    "chars": 152
+  },
+  "final_filtered_accel_norm": 1.0056385235262222,
+  "final_filtered_gyro_norm": 1.3607016351867884,
+  "serial_line_bytes": {
+    "min": 148,
+    "max": 182,
+    "mean": 166.159169550173,
+    "mean_wire_time_ms_at_115200_8N1": 14.423539023452518
+  },
+  "caveats": [
+    "Console extract has no sample timestamps or annotated physical-action times.",
+    "Serial rows are emitted only during movement and include the end boundary; idle absence is not proof of zero motion.",
+    "Python console output is throttled; printed-row sequence differences are not packet-loss counts.",
+    "GAP 6550->6560 matches known firmware stop/restart; GAP 861->921 lacks corresponding serial coverage.",
+    "No end-to-end loss percentage, sample-rate distribution, or network latency can be calculated from this extract.",
+    "No saturation flags in this capture does not positively test the saturation branch.",
+    "Measured processing excludes bulk Serial prints and WiFi send; jitter is relative to a 5000 us target."
+  ]
+}
