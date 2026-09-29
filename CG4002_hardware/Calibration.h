@@ -10,6 +10,12 @@ struct GyroCalibration {
   float biasZ;
 };
 
+struct AccelCalibration {
+  float offsetX_g;
+  float offsetY_g;
+  float offsetZ_g;
+};
+
 
 // Function used to calibrate the gyroscope.
 //
@@ -22,6 +28,12 @@ struct GyroCalibration {
 // sampleDelayMs:
 //   Delay between calibration samples.
 GyroCalibration calibrateGyroscope(
+  SensorFrame (*readSensor)(),
+  int calibrationSamples,
+  unsigned long sampleDelayMs
+);
+
+AccelCalibration calibrateAccelerometer(
   SensorFrame (*readSensor)(),
   int calibrationSamples,
   unsigned long sampleDelayMs

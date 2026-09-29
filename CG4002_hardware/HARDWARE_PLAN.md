@@ -1,7 +1,8 @@
 # Plan: FireBeetle Sensor Node Hardware Build (Sensors + Haptics only)
 
-Scope: Section 3 (Hardware Sensors) of `CG4002_Design_Report.md` only. Excludes BLE/MQTT
-(Section 4, Comms teammate), FPGA/AI (Section 5), AR visualizer (Section 6).
+Scope: Section 3 (Hardware Sensors) of `CG4002_Design_Report.md` plus a temporary WiFi
+telemetry demonstration for electronics validation. Excludes final BLE/MQTT (Section 4,
+Comms teammate), FPGA/AI (Section 5), and AR visualizer (Section 6).
 
 Starting point: existing skeleton in `CG4002_hardware/` (fake IMU, gyro-only calibration +
 low-pass filter, circular buffer). All physical parts have arrived.
@@ -10,12 +11,13 @@ low-pass filter, circular buffer). All physical parts have arrived.
 
 - **IMU bus: I2C** (not SPI as in the design report) — simpler wiring with the dupont/perfboard
    parts on hand. This deviates from report Section 3.2.3; flag to the team/report later, not
-   part of this plan. The DRV2605L haptic path is separate: use an ESP32 PWM/analog control
-   signal to its input, with no runtime I2C communication between the FireBeetle and haptic
-   driver.
+   part of this plan. The haptic path is separate: the part on hand is a simple 3-pin ERM
+   driver module (`IN`/`VCC`/`GND`, not a DRV2605L), driven directly by an ESP32 GPIO
+   (`GPIO25`) via PWM, with no I2C communication between the FireBeetle and the haptic driver.
 - **Hand-off boundary**: firmware exposes an internal callback + finalized data struct
   (extended `SensorFrame` incl. node ID, physical units, status flags) for the Comms
-  teammate to wire into BLE/GATT later. No BLE code is written as part of this plan.
+   teammate to wire into BLE/GATT later. A temporary WiFi telemetry bridge to a laptop is
+   included as an electronics-only validation tool; it is not the final BLE/MQTT protocol.
 - **Build order**: bring up ONE node fully (forearm node — has IMU + haptic, more complex)
   end-to-end and bench-validate before duplicating wiring/firmware/enclosure to the
   second (paddle) node.
@@ -24,6 +26,9 @@ low-pass filter, circular buffer). All physical parts have arrived.
 - Firmware logic (buffering, device state machine, packet format, filtering behaviour) is
   hardened against simulated/fake data first, before any real IMU/haptic hardware is wired
   in — isolates firmware-logic bugs from hardware bring-up bugs.
+- **Packaging order**: validate both nodes as loose, breadboarded electronics before
+   perfboard soldering or pod mounting. Mechanical packaging is intentionally deferred because
+   the enclosure and wiring may still change.
 
 ## Phases
 
@@ -80,7 +85,7 @@ immediately without waiting on wiring/soldering.
    PWM control signal and motor wiring come later in Phase E.
 10. **Define the sensor coordinate convention**: document the intended per-node axis-mapping
     rule (paddle vs forearm) now, as a provisional convention to be confirmed once the
-   3D-printed pods are in hand (Phase G). **Draft convention**: expose one right-handed
+   3D-printed pods are in hand (Phase H). **Draft convention**: expose one right-handed
    canonical frame to downstream processing — +X points in the implement/hand forward
    swing direction, +Y points toward the player's left, and +Z points outward from the
    forearm/paddle surface. For the forearm node, map the IMU's physically measured
@@ -88,7 +93,7 @@ immediately without waiting on wiring/soldering.
    node, map the IMU's handle-to-head, player-left/right, and face-normal axes into
    canonical X/Y/Z. Store each mapping as an axis permutation plus sign for each node;
    do not apply assumed signs yet. Confirm the actual permutations/signs after the pods
-   are mounted in Phase G, including a left-handed-player adjustment if needed.
+   are mounted in Phase H, including a left-handed-player adjustment if needed.
 
 ### Phase C — Real IMU Integration (forearm node) — *depends on A, B*
 
@@ -104,48 +109,147 @@ immediately without waiting on wiring/soldering.
    `SensorFrame (*readSensor)()` function-pointer signature already used by `Calibration.h`,
    so the calibration code needs no changes. **Verified** — real I2C reads now feed both
    calibration and the production buffer path.
-4. Add raw→physical unit conversion (counts → g / °/s) using the configured FS range —
-   currently missing; existing code calibrates/filters raw int16 counts directly. **Verified**
-   — real frames now populate `g` and `dps` fields using the configured ±16g and ±2000dps
-   scales and set `SENSOR_STATUS_PHYSICAL_UNITS_VALID`.
+4. Add raw→physical unit conversion (counts → g / °/s) using the configured FS range.
+   **Verified** — real frames now populate `g` and `dps` fields using the configured ±16g
+   and ±2000dps scales and set `SENSOR_STATUS_PHYSICAL_UNITS_VALID`.
 
 ### Phase D — Sensor Processing Pipeline Completion — *depends on C*
 
+> **Bug found and fixed during Phase G bench validation**: `ICM42686P::readRaw()` read 14
+> bytes from `0x1F` and indexed gyro data starting at `data[8]` instead of `data[6]`. Real
+> register map is Accel `0x1F`-`0x24` (6 bytes) + Gyro `0x25`-`0x2A` (6 bytes) = 12 bytes
+> total; the extra 2 bytes read (`0x2B`/`0x2C`) are `TMST_FSYNCH`/`TMST_FSYNCL`, not sensor
+> data. Effect: `gx` was actually gyro Y, `gy` was actually gyro Z, and `gz` was reading the
+> FSYNC timestamp register (constant/near-zero) instead of any gyro axis at all --
+> confirmed by a WiFi telemetry capture showing `gz` exactly `0.000000` on every one of 119
+> consecutive samples, which is not physically plausible for a live gyro. Fixed by reading
+> only the 12 real bytes and correcting the gyro indices. **This invalidates the axis
+> attribution (not the values) of every gyro-related verification below** -- D.1 gyro bias
+> calibration and D.4 saturation checks were computed against mislabeled axes. **Re-verified**
+> — a live shake/lift WiFi capture (668 samples) shows all three gyro axes now varying
+> independently and correlated with the physical motion (previously `gz` was a constant
+> `0.000000`), sequence numbers fully continuous, `status_flags=6` throughout with no false
+> saturation, and values settle back to the stationary baseline after the motion ends.
+
 1. Extend calibration: current `Calibration.cpp` only estimates gyro bias. Add a stationary
    accelerometer bias/offset check (lighter-weight than full 6-point calibration — see
-   Further Considerations).
+   Further Considerations). **Verified** — with the IMU flat and +Z upward, the routine
+   completed and produced offsets of approximately X=`0.0015g`, Y=`0.0507g`, Z=`0.0038g`.
+   **Re-verification pending** for gyro bias values after the register-offset fix above.
 2. Extend filtering: `LowPassFilter` is currently applied to gyro channels only in the `.ino`
    loop; apply the same filter class to accelerometer channels — reuse the Phase B impact-
-   preservation tuning as the starting `FILTER_ALPHA`.
+   preservation tuning as the starting `FILTER_ALPHA`. **Implemented** — raw and calibrated
+   values remain available, explicit filtered physical-unit fields now cover all six axes, and
+   post-filter frames are sent over the temporary WiFi telemetry path. **Verified** — stationary
+   data settles near the expected calibrated values and the table-vibration run showed filtered
+   acceleration and gyro channels following larger changes with deliberate smoothing and no
+   saturation.
 3. Add axis-convention mapping constants per node (paddle vs forearm), matched to how the
    3D-printed pod mechanically keys the IMU orientation (per report 3.2.2) — refine the
-   provisional convention drafted in Phase B.
+   provisional convention drafted in Phase B. **Implemented provisionally** in
+   `AxisMapping.h`: identity, axis-swap/sign-flip examples, and a single active per-node
+   mapping constant are available. Physical orientation verification remains pending.
 4. Add saturation/validity flagging per report 3.2.2 formula (`|a_i| >= eta * A_FS`, similar
-   for gyro), and roll into a status-flags bitfield.
+   for gyro), and roll into a status-flags bitfield. **Implemented** — saturation detection now
+   sets `SENSOR_STATUS_SATURATED`, while physical-unit and calibration flags remain explicit;
+   runtime saturation verification remains pending. **Verified** — normal stationary and vigorous
+   motion samples correctly reported `status_flags=6` without false saturation, while the node
+   remained stable with no dropped samples or fault transition. The positive `status_flags=7`
+   trigger path was not forced because the configured threshold is approximately 14.4g or
+   1,800dps, beyond ordinary hand shaking.
 5. Circular buffer, sequence numbers, and device state machine were already built and stress-
    tested in Phase B — this phase just wires the real driver's timing through them, no
-   structural changes expected.
+   structural changes expected. **Implemented for real-IMU verification** — added a consumer
+   sequence-gap counter to the periodic stats output. **Verified** — the real-IMU run reached
+   `STREAMING` with `dropped=0`, `sequenceGaps=0`, `highWaterMark=1/256`, stable processing
+   margin of approximately 4.98ms, and no fault transition. The elevated producer-jitter values
+   are attributed to verbose per-sample Serial output and are not treated as a normal timing
+   result.
 
 ### Phase E — Haptic Actuator Integration (forearm node only) — *parallel with D, depends on A, B*
 
-1. Wire the DRV2605L breakout's PWM/analog input to a dedicated FireBeetle GPIO and connect
-   the ERM motor to the driver's output pads; do not place the driver on the IMU's I2C bus.
-2. Confirm the breakout is configured for the DRV2605L PWM/analog input mode and document the
-   required PWM frequency/duty-cycle range from the breakout/datasheet. No runtime I2C driver,
-   device-ID read, library selection, or auto-calibration sequence is required for this path.
-3. Replace the Phase B Serial-log stub with `triggerHapticPattern(state)` generating the real
-   PWM waveform — actual invocation from a received HAPTIC_CMD is Comms' job later; for now
-   bench-test by calling it directly from `loop()`/Serial command for validation.
+**Hardware correction**: the actual part on hand is a simple 3-pin ERM driver module
+(`IN`/`VCC`/`GND`), not a DRV2605L breakout. `IN` takes a direct GPIO PWM/digital signal;
+there is no I2C, no device ID, and no auto-calibration sequence for this part.
+
+1. **Verified** — module wired as FireBeetle `GPIO25` -> `IN`, `3V3` -> `VCC`, shared `GND`
+   with the IMU/FireBeetle. Kept off the IMU's I2C pins (21/22) entirely.
+2. **Verified** — bench-tested with `digitalWrite`/`analogWrite` via a standalone sketch
+   (`haptic_test/haptic_test.ino`). The module is only felt at duty cycle >=200/255; below
+   that it's effectively imperceptible.
+3. **Implemented** — the Phase B Serial-log stub in `triggerHapticPattern(state)` is replaced
+   with a real non-blocking PWM pattern player (`HAPTIC_DUTY_ON = 255`, per-pattern on/off
+   step sequences advanced via `updateHapticPattern()` in `loop()`, no `delay()` so the 200 Hz
+   sample timing is unaffected). Bench-test hook: send `1`/`2`/`3` over Serial to trigger
+   single/double/fault patterns directly (`pollHapticTestCommand()`). Actual invocation from a
+   received HAPTIC_CMD remains Comms' job later.
+
+Remaining before Phase E is fully closed: physically confirm each pattern is distinguishable
+by feel with the motor mounted on the forearm (currently only bench-tested loose on a table).
+
+**Phase E: closed.** All three patterns bench-tested via Serial (`1`/`2`/`3`) at full duty
+(255) with tuned step timing (150ms on-steps; double pulse separated by a 250ms gap; fault
+pattern is three 150ms pulses). User-confirmed: single is a clean pulse, double is a clearly
+distinct two-beat pattern, fault is a clearly distinct triple pulse.
 
 ### Phase F — Hand-off Interface Definition — *depends on D, E*
 
 1. Finalize the extended sensor-output struct drafted in Phase B (node ID, sequence number,
    timestamp, physical-unit accel/gyro, status flags) building on `SensorFrame.h` — this is
-   the contract the Comms teammate consumes; no transport code included.
+   the contract the Comms teammate consumes; no transport code included. **Verified** — the
+   struct already carries every field listed above; no structural changes were needed.
 2. Document expected units, ranges, and the haptic pattern enum so Comms can build the
    SENSOR_DATA / HAPTIC_CMD packet framing from Section 4.2.3 against real field names.
+   **Done** — see `HANDOFF.md` for the field-by-field reference, `status_flags` bit meanings,
+   the `HapticPattern` enum contract, and the open item that node lifecycle state is not yet
+   part of `SensorFrame` (flagged for Comms if HELLO needs it).
 
-### Phase G — Node 1 (Forearm) Mechanical + Electrical Packaging — *depends on C, D, E*
+### Phase G — Electronics-Only Node Validation and Temporary WiFi Bridge — *depends on C, D, E*
+
+This phase is the new near-term priority and a presentation-ready proof-of-function checkpoint:
+the forearm and paddle electronics must work independently, but no mechanical design is being
+claimed or finalized yet. Breadboards, jumper wires, loose breakout boards, temporary battery
+connections, USB only for debugging, and the laptop receiver are sufficient. Do not solder,
+move to perfboard, hardwire connections, or require 3D-printed pods in this phase.
+
+1. **Battery-only FireBeetle operation**: disconnect USB power after flashing, connect the
+   protected LiPo through the FireBeetle JST connector, and verify boot, IMU acquisition, and
+   runtime stability. Measure battery voltage before/after a short run and record current draw
+   if a multimeter is available. USB may remain connected only for a deliberately documented
+   serial-power test; it is not the battery validation path.
+2. **Forearm electronics validation**: with the loose IMU and DRV2605L/ERM wiring on a
+   breadboard, verify real IMU readings, calibration, physical-unit conversion, and each
+   haptic pattern. No soldering or enclosure mounting is required.
+3. **Paddle electronics validation**: connect the second ICM-42686-P to FireBeetle #2,
+   configure its node role/ID, and repeat IMU calibration, raw/physical-unit readings, and
+   timing checks. No haptic hardware is attached to this node.
+4. **Temporary WiFi telemetry firmware**: configure the ESP32 as a WiFi station on the phone
+   hotspot, then send newline-delimited packet-ready `SensorFrame` data by UDP unicast to the
+   laptop's hotspot IP. Fill in the hotspot SSID/password and laptop IP placeholders. Include
+   node ID, sequence number, timestamp, raw/physical-unit fields, and status flags.
+   **Implemented opt-in** in `WiFiTelemetry.h/.cpp` and `CG4002_hardware.ino`;
+   `ENABLE_WIFI_TELEMETRY` is `false` by default, so it cannot affect the normal IMU pipeline
+   until deliberately enabled. An additional `WIFI_ONLY_DEMO` mode is implemented for the
+   naked-ESP32 checkpoint: it skips IMU initialization and sends deterministic mock packet data
+   so hotspot connectivity can be tested before the components are available. This is a short
+   demonstration bridge, not the final BLE/GATT/MQTT design. **Initial single-ESP32 hotspot
+   demo verified** — the ESP32 connected through the phone hotspot and sent continuous mock
+   telemetry to the laptop receiver. Formal packet-loss and latency measurement remain open.
+5. **Laptop receiver script**: provide a small laptop-side script that listens for the
+   temporary UDP packets, validates node ID/sequence/timestamp fields, and prints decoded
+   samples to the shell. **Implemented** as `wifi_receiver.py`; it binds to all local
+   interfaces by default and can optionally filter by the ESP32 sender IP. Test one node
+   first, then both nodes separately; record packet loss and approximate end-to-end latency on
+   hardware. **Initial single-ESP32 hotspot demo verified** — the laptop received continuous
+   sequential packets from the ESP32 over the phone hotspot. Packet-loss rate and latency are
+   still to be measured formally.
+6. **Acceptance gate**: do not proceed to soldering or pod design lock until both boards can
+   boot from LiPo, acquire their respective IMU data, and deliver readable telemetry to the
+   laptop receiver. Keep the USB serial path available for debugging, but do not treat it as
+   the WiFi demonstration. The successful completion of this gate is the Phase G checkpoint
+   that can be presented before the mechanical design is finalized.
+
+### Phase H — Node 1 (Forearm) Mechanical + Electrical Packaging — *depends on G*
 
 1. Move the breadboard circuit to perfboard: solder female headers for the IMU/DRV2605L
    breakouts (keep pluggable for rework), wire the dedicated PWM GPIO to the DRV2605L input,
@@ -156,7 +260,7 @@ immediately without waiting on wiring/soldering.
 3. Attach the enclosure pod to the forearm elastic/compression cuff; verify a fixed,
    repeatable orientation (matches the Phase C axis-mapping assumption).
 
-### Phase H — Node 1 Bench Validation — *depends on G*
+### Phase I — Node 1 Bench Validation — *depends on H*
 
 1. Verify calibration convergence (stationary bias stable), filter behaviour, saturation
    flagging (shake test near sensor limits), 5 ms loop timing budget (measure via `micros()`)
@@ -167,17 +271,17 @@ immediately without waiting on wiring/soldering.
 3. Rough current-draw check (multimeter) against the report's ~85 mA estimate for the
    forearm node.
 
-### Phase I — Node 2 (Paddle) Duplication — *depends on H*
+### Phase J — Node 2 (Paddle) Duplication — *depends on I*
 
 1. Repeat Phase C–D (IMU integration + processing pipeline) on FireBeetle #2 — no haptic
    module. The Phase B firmware hardening already applies to both boards.
 2. Introduce a compile-time/config node-ID differentiation (e.g. `#define NODE_ROLE`) so
    paddle vs forearm share the same Calibration/LowPassFilter/SensorFrame codebase.
-3. Repeat Phase G packaging into the paddle enclosure pod, mounted near the paddle handle
+3. Repeat Phase H packaging into the paddle enclosure pod, mounted near the paddle handle.
    via the paddle mounting straps.
-4. Repeat Phase H bench validation for the paddle node (no haptic checks needed).
+4. Repeat Phase I bench validation for the paddle node (no haptic checks needed).
 
-### Phase J — Dual-Node Integration Check & Hand-off Package — *depends on I*
+### Phase K — Dual-Node Integration Check & Hand-off Package — *depends on J*
 
 1. Wear/mount both nodes together; confirm no interference with grip/swing, cuff comfort,
    enclosure fit, sensor stability during a few sample swings.

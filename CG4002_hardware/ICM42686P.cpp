@@ -23,22 +23,27 @@ bool ICM42686P::begin(TwoWire& wire, uint8_t address) {
   bus = &wire;
   deviceAddress = address;
 
-  if (readRegister(REG_WHO_AM_I) != EXPECTED_WHO_AM_I) {
+  uint8_t whoAmI = readRegister(REG_WHO_AM_I);
+  if (whoAmI != EXPECTED_WHO_AM_I) {
+    Serial.println("[imu] WHO_AM_I check failed");
     return false;
   }
 
   if (!writeRegister(REG_PWR_MGMT0,
                      (LOW_NOISE_MODE << 2) | LOW_NOISE_MODE)) {
+    Serial.println("[imu] PWR_MGMT0 write failed");
     return false;
   }
 
   if (!writeRegister(REG_GYRO_CONFIG0,
                      (DEFAULT_GYRO_FS << 5) | ODR_200HZ)) {
+    Serial.println("[imu] GYRO_CONFIG0 write failed");
     return false;
   }
 
   if (!writeRegister(REG_ACCEL_CONFIG0,
                      (DEFAULT_ACCEL_FS << 5) | ODR_200HZ)) {
+    Serial.println("[imu] ACCEL_CONFIG0 write failed");
     return false;
   }
 
@@ -64,7 +69,8 @@ bool ICM42686P::writeRegister(uint8_t address, uint8_t value) {
   bus->beginTransmission(deviceAddress);
   bus->write(address);
   bus->write(value);
-  return bus->endTransmission() == 0;
+  uint8_t error = bus->endTransmission();
+  return error == 0;
 }
 
 bool ICM42686P::readRegisters(uint8_t startAddress, uint8_t* data, size_t length) {
@@ -74,7 +80,8 @@ bool ICM42686P::readRegisters(uint8_t startAddress, uint8_t* data, size_t length
 
   bus->beginTransmission(deviceAddress);
   bus->write(startAddress);
-  if (bus->endTransmission(false) != 0) {
+  uint8_t writeError = bus->endTransmission(true);
+  if (writeError != 0) {
     return false;
   }
 
@@ -91,7 +98,9 @@ bool ICM42686P::readRegisters(uint8_t startAddress, uint8_t* data, size_t length
 }
 
 bool ICM42686P::readRaw(SensorFrame& frame) {
-  uint8_t data[14];
+  // Accel X/Y/Z = 0x1F-0x24, Gyro X/Y/Z = 0x25-0x2A -- 12 bytes total.
+  // (0x2B/0x2C beyond this are TMST_FSYNCH/L, not gyro data -- do not read them.)
+  uint8_t data[12];
 
   if (!readRegisters(REG_ACCEL_DATA_X1, data, sizeof(data))) {
     return false;
@@ -101,9 +110,9 @@ bool ICM42686P::readRaw(SensorFrame& frame) {
   frame.ax = (int16_t)((data[0] << 8) | data[1]);
   frame.ay = (int16_t)((data[2] << 8) | data[3]);
   frame.az = (int16_t)((data[4] << 8) | data[5]);
-  frame.gx = (int16_t)((data[8] << 8) | data[9]);
-  frame.gy = (int16_t)((data[10] << 8) | data[11]);
-  frame.gz = (int16_t)((data[12] << 8) | data[13]);
+  frame.gx = (int16_t)((data[6] << 8) | data[7]);
+  frame.gy = (int16_t)((data[8] << 8) | data[9]);
+  frame.gz = (int16_t)((data[10] << 8) | data[11]);
 
   frame.ax_g = frame.ax / ACCEL_LSB_PER_G;
   frame.ay_g = frame.ay / ACCEL_LSB_PER_G;

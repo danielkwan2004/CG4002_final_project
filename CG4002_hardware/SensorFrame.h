@@ -7,7 +7,8 @@ enum SensorStatusFlags : uint8_t {
   SENSOR_STATUS_NONE = 0x00,
   SENSOR_STATUS_SATURATED = 0x01,
   SENSOR_STATUS_PHYSICAL_UNITS_VALID = 0x02,
-  SENSOR_STATUS_CALIBRATED = 0x04
+  SENSOR_STATUS_CALIBRATED = 0x04,
+  SENSOR_STATUS_MOVE_ACTIVE = 0x08
 };
 
 struct SensorFrame {
@@ -31,6 +32,14 @@ struct SensorFrame {
   float gx_dps;
   float gy_dps;
   float gz_dps;
+
+  float ax_filtered_g;
+  float ay_filtered_g;
+  float az_filtered_g;
+
+  float gx_filtered_dps;
+  float gy_filtered_dps;
+  float gz_filtered_dps;
 
   uint8_t status_flags;
 };
