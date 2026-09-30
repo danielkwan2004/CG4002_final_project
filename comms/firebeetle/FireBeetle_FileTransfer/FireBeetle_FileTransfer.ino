@@ -41,6 +41,8 @@ volatile uint16_t requestedBatchStart = 0;
 volatile uint8_t requestedBatchCount = 0;
 
 
+// Hash file contents in small blocks rather than loading the full file into RAM.
+// This transfer-integrity SHA-256 is separate from submission ZIP MD5 hashes.
 String fileSHA256() {
     File file = LittleFS.open(DEMO_FILE_PATH, "r");
     if (!file) return "";
@@ -169,6 +171,8 @@ void sendMetadata() {
 }
 
 
+// The laptop requests an index range, then requests individual missing chunks.
+// File bytes use binary packets; metadata and transfer controls use JSON.
 void sendChunkBatch(uint16_t startIndex, uint8_t count) {
     if (count == 0 || count > CHUNKS_PER_BATCH) return;
 

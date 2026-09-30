@@ -1,7 +1,14 @@
+# Keep detailed packet evidence on disk while the default terminal shows INFO.
+# Formatting happens on a logging thread so callbacks do not wait on file I/O.
+import atexit
+import json
 import logging
 import sys
-from pathlib import Path
+import queue
+from .constants import packet_type_name
 from datetime import datetime
+from logging.handlers import QueueHandler, QueueListener
+from pathlib import Path
 
 
 DEVICE_COLORS = {
@@ -59,7 +66,6 @@ def get_logger(name: str, verbose: bool = False, log_dir: str | Path = DEFAULT_L
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setLevel(logging.DEBUG if verbose else logging.INFO)
     console_handler.setFormatter(console_formatter)
-    logger.addHandler(console_handler)
 
     # File handler: always DEBUG, regardless of -v 
     Path(log_dir).mkdir(parents=True, exist_ok=True)
@@ -69,7 +75,33 @@ def get_logger(name: str, verbose: bool = False, log_dir: str | Path = DEFAULT_L
     file_handler = logging.FileHandler(log_path)
     file_handler.setLevel(logging.DEBUG)
     file_handler.setFormatter(formatter)
-    logger.addHandler(file_handler)
+    # BLE and MQTT callbacks must not wait for disk/terminal I/O per sample.
+    # Keep every decoded packet in the file; formatting/output run on one worker.
+    records = queue.SimpleQueue()
+    logger.addHandler(QueueHandler(records))
+    logger.propagate = False
+    listener = QueueListener(records, console_handler, file_handler, respect_handler_level=True)
+    listener.start()
+    atexit.register(listener.stop)
+    logger._packet_log_listener = listener
 
     logger.info(f"Logging to {log_path} (console level: {'DEBUG' if verbose else 'INFO'})")
     return logger
+
+
+# The readable packet type is a log-only representation. Publishers continue
+# sending numeric type fields, and binary BLE decoding remains separate.
+def format_packet_for_log(payload):
+    """Render a log-only copy with a readable type; leave wire data untouched."""
+    if isinstance(payload, (bytes, bytearray)):
+        payload = payload.decode(errors="replace")
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except ValueError:
+            return payload
+    if isinstance(payload, dict):
+        payload = dict(payload)
+        if "type" in payload:
+            payload["type"] = packet_type_name(payload["type"])
+    return json.dumps(payload)

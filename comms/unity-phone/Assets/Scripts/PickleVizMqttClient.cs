@@ -14,8 +14,15 @@ using MQTTnet.Client;
 using MQTTnet.Protocol;
 using TMPro;
 
+// Phone-side MQTT bridge: connect securely, receive sensor/AI data, and refresh the HUD.
+// Walkthrough: Start -> ApplyBrokerAddress -> RunConnectionLoopAsync -> ConnectAsync
+// -> MQTT callbacks -> Update. Shutdown cancels the loop, which releases the connection.
+// Final MQTT display endpoint. Network callbacks receive data; Update() applies
+// it to Unity UI objects on the main thread. Latency echoes measure transport RTT,
+// not the time at which the result becomes visible on the screen.
 public class PickleVizMqttClient : MonoBehaviour
 {
+    // Configuration and scene references. Keep field names stable for Unity serialisation.
     [Header("Broker settings")]
     public string brokerHost = "";
     public int brokerPort = 8883;
@@ -29,31 +36,28 @@ public class PickleVizMqttClient : MonoBehaviour
     public string sensorTopic = "fb/sensor/raw";
     public string resultTopic = "ultra96/ai/results";
 
+    // Keep these routes in sync with utilities/constants.py.
+    private const string LatencyRequestTopic = "latency/phone/req";
+    private const string LatencyResponseTopic = "latency/laptop/resp";
+
     private IMqttClient mqttClient;
     public TMP_Text aiResultText;
     public TMP_Text sensorText;
     public TMP_Text statsText;
     public TMP_Text statusText;
 
+    // MQTT callbacks hand data to Update; Unity UI changes happen on the main thread.
+    // Queue AI results so each is counted; keep only the latest high-rate sensor reading.
     private readonly ConcurrentQueue<string> pendingMessages =
         new ConcurrentQueue<string>();
 
+    private string pendingSensorPayload;
     private int sensorPacketCount = 0;
     private int aiResultCount = 0;
     private string latestSensorPayload = "";
-    private string latestAIResultSummary = "";
-
-    // Only display useful fields. JsonUtility ignores session IDs and the
-    // potentially long sensor_seqs array without including them in the UI.
-    [Serializable]
-    private class AIResultDisplayPacket
-    {
-        public long result_seq;
-        public string stroke;
-        public float confidence;
-        public int sample_pairs;
-    }
+    private string latestAIResultPayload = "";
     private float lastAIResultTime;
+    // Connection status is shared with MQTT callbacks; the loop owns client cleanup.
     private volatile bool mqttConnected = false;
     private volatile string connectionStatus = "Starting MQTT...";
     private volatile string connectionStage = "startup";
@@ -64,6 +68,7 @@ public class PickleVizMqttClient : MonoBehaviour
     private Task connectionTask = Task.CompletedTask;
     private bool stopping;
     private bool changingAddress;
+    // Persist the host and username only. The password stays in memory for this session.
     private const string BrokerHostKey = "PickleViz.BrokerHost";
     private const string UsernameKey = "PickleViz.Username";
     [SerializeField] private TMP_InputField usernameInput;
@@ -72,10 +77,12 @@ public class PickleVizMqttClient : MonoBehaviour
     [SerializeField] private Button connectButton;
     [SerializeField] private TMP_Text addressHint;
 
+    // Payload-byte counter shared with callbacks; Update samples it every five seconds.
     private long mqttBytes;
     private float statsStarted;
     private float mqttKbps;
 
+    // 1. Restore login defaults and wire the button; connecting requires a user click.
     private void Start()
     {
         statsStarted = Time.realtimeSinceStartup;
@@ -105,6 +112,7 @@ public class PickleVizMqttClient : MonoBehaviour
         connectionTask = RunConnectionLoopAsync(connectionLifetime.Token);
     }
 
+    // 2. Validate login details, stop any previous session, then start the new one.
     private async void ApplyBrokerAddress()
     {
         if (changingAddress || stopping) return;
@@ -161,6 +169,8 @@ public class PickleVizMqttClient : MonoBehaviour
         }
     }
 
+    // 3. Own the connection lifetime and retry with a delay that grows from 2s to 30s.
+    // A successful connection resets the delay; cancellation runs cleanup in finally.
     private async Task RunConnectionLoopAsync(CancellationToken cancellationToken)
     {
         int retrySeconds = 2;
@@ -190,7 +200,7 @@ public class PickleVizMqttClient : MonoBehaviour
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            // Scene destruction or application shutdown intentionally stops retries.
+            // Switching brokers, scene destruction, or shutdown intentionally stops retries.
         }
         catch (Exception exception)
         {
@@ -205,6 +215,7 @@ public class PickleVizMqttClient : MonoBehaviour
         }
     }
 
+    // Detach callbacks before disposing the client and its bundled CA certificate.
     private void ReleaseConnection()
     {
         if (mqttClient != null)
@@ -227,6 +238,8 @@ public class PickleVizMqttClient : MonoBehaviour
         Debug.Log($"MQTT: {stage}");
     }
 
+    // 4. Load the bundled CA, configure TLS/authentication, and attempt one connection.
+    // Stage messages help distinguish TCP, certificate, and MQTT login failures.
     private async Task<bool> ConnectAsync(CancellationToken cancellationToken)
     {
         connecting = true;
@@ -234,7 +247,6 @@ public class PickleVizMqttClient : MonoBehaviour
         try
         {
             SetConnectionStage("Loading CA resource...");
-            // Unity strips only the final .txt extension from ca.crt.txt.
             TextAsset caAsset = Resources.Load<TextAsset>("ca.crt");
             if (caAsset == null)
                 throw new InvalidOperationException(
@@ -262,6 +274,7 @@ public class PickleVizMqttClient : MonoBehaviour
             mqttClient.DisconnectedAsync += OnDisconnected;
             mqttClient.ApplicationMessageReceivedAsync += OnMessageReceived;
 
+            // Accept only a valid chain rooted at our bundled CA, with a matching host.
             var tlsOptions = new MqttClientTlsOptionsBuilder()
                 .UseTls()
                 .WithSslProtocols(SslProtocols.Tls12)
@@ -344,6 +357,7 @@ public class PickleVizMqttClient : MonoBehaviour
         }
     }
 
+    // Optional diagnostic: check TCP reachability before starting the secure connection.
     private async Task ProbeTcpAsync(CancellationToken cancellationToken)
     {
         SetConnectionStage($"Testing TCP to {brokerHost}:{brokerPort} (10s timeout)...");
@@ -375,14 +389,13 @@ public class PickleVizMqttClient : MonoBehaviour
         catch (Exception) { /* The timeout is already reported by ProbeTcpAsync. */ }
     }
 
-    private async Task OnConnected(
-        MqttClientConnectedEventArgs args
-    )
+    // 5. Subscribe on every connection, including reconnects.
+    // Sensor/probe traffic uses QoS 0; AI results use QoS 1 (at least once).
+    private async Task OnConnected(MqttClientConnectedEventArgs args)
     {
         mqttConnected = true;
         SetConnectionStage("MQTT connected; subscribing...");
         Debug.Log("Connected to MQTT broker");
-
 
         if (!mqttClient.IsConnected)
         {
@@ -393,18 +406,21 @@ public class PickleVizMqttClient : MonoBehaviour
         await mqttClient.SubscribeAsync(
             new MqttTopicFilterBuilder()
                 .WithTopic(sensorTopic)
-                .WithQualityOfServiceLevel(
-                    MqttQualityOfServiceLevel.AtMostOnce
-                )
+                .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtMostOnce)
                 .Build()
         );
 
         await mqttClient.SubscribeAsync(
             new MqttTopicFilterBuilder()
                 .WithTopic(resultTopic)
-                .WithQualityOfServiceLevel(
-                    MqttQualityOfServiceLevel.AtLeastOnce
-                )
+                .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce)
+                .Build()
+        );
+
+        await mqttClient.SubscribeAsync(
+            new MqttTopicFilterBuilder()
+                .WithTopic(LatencyRequestTopic)
+                .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtMostOnce)
                 .Build()
         );
 
@@ -412,9 +428,8 @@ public class PickleVizMqttClient : MonoBehaviour
         Debug.Log("Subscribed to MQTT topics");
     }
 
-    private Task OnDisconnected(
-        MqttClientDisconnectedEventArgs args
-    )
+    // Report the disconnect; RunConnectionLoopAsync handles the retry.
+    private Task OnDisconnected(MqttClientDisconnectedEventArgs args)
     {
         mqttConnected = false;
         string detail = args.Exception != null
@@ -427,29 +442,60 @@ public class PickleVizMqttClient : MonoBehaviour
         return Task.CompletedTask;
     }
 
-    private Task OnMessageReceived(
-        MqttApplicationMessageReceivedEventArgs args
-    )
+    // 6. Route incoming messages without touching Unity UI objects.
+    // Keep sensor updates as a latest-value slot to avoid a UI backlog. AI
+    // results are queued individually so each received result can be counted.
+    private async Task OnMessageReceived(MqttApplicationMessageReceivedEventArgs args)
     {
         string topic = args.ApplicationMessage.Topic;
         string payload = Encoding.UTF8.GetString(
             args.ApplicationMessage.PayloadSegment
         );
 
-        pendingMessages.Enqueue(
-            topic + "\n" + payload
-        );
-        mqttBytes += Encoding.UTF8.GetByteCount(payload);
+        if (topic == LatencyRequestTopic)
+        {
+            // Echo the laptop's opaque probe; the laptop measures RTT on its own clock.
+            // Handle on the MQTT callback, so this does not measure Unity rendering time.
+            var client = mqttClient;
+            if (client != null && client.IsConnected && args.ApplicationMessage.PayloadSegment.Count <= 512)
+            {
+                try
+                {
+                    await client.PublishAsync(new MqttApplicationMessageBuilder()
+                        .WithTopic(LatencyResponseTopic)
+                        .WithPayload(payload)
+                        .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtMostOnce)
+                        .Build());
+                }
+                catch (Exception exception)
+                {
+                    Debug.LogWarning($"Latency reply failed: {exception.Message}");
+                }
+            }
+            return;
+        }
 
-        if (topic == resultTopic)
+        // Latency probes return above, so they are excluded from receive statistics.
+        Interlocked.Add(ref mqttBytes, args.ApplicationMessage.PayloadSegment.Count);
+        if (topic == sensorTopic)
+        {
+            // The UI only needs the newest reading, not 200-400 queued redraws/sec.
+            Interlocked.Exchange(ref pendingSensorPayload, payload);
+            Interlocked.Increment(ref sensorPacketCount);
+        }
+        else if (topic == resultTopic)
+        {
+            pendingMessages.Enqueue(topic + "\n" + payload);
             Debug.Log($"Received AI result [{topic}] ({args.ApplicationMessage.PayloadSegment.Count} bytes)");
-        else
-            Debug.Log($"Received [{topic}]: {payload}");
-        return Task.CompletedTask;
+        }
     }
 
+    // 7. Consume callback data and render it on Unity's main thread once per frame.
+    // Unity UI access stays here rather than inside asynchronous MQTT callbacks.
     private void Update()
     {
+        string sensorPayload = Interlocked.Exchange(ref pendingSensorPayload, null);
+        if (sensorPayload != null) latestSensorPayload = sensorPayload;
         while (pendingMessages.TryDequeue(out string message))
         {
             int separator = message.IndexOf('\n');
@@ -465,38 +511,33 @@ public class PickleVizMqttClient : MonoBehaviour
             else if (topic == resultTopic)
             {
                 aiResultCount++;
-                latestAIResultSummary = BuildAIResultSummary(payload);
+                latestAIResultPayload = payload;
                 lastAIResultTime = Time.realtimeSinceStartup;
             }
         }
 
+        // Measure payload throughput in decimal kbps; MQTT/TLS overhead is excluded.
         float elapsed = Time.realtimeSinceStartup - statsStarted;
         if (elapsed >= 5f)
         {
-            mqttKbps = (float)(mqttBytes * 8.0 / elapsed / 1000.0);
-            mqttBytes = 0;
+            mqttKbps = (float)(Interlocked.Exchange(ref mqttBytes, 0) * 8.0 / elapsed / 1000.0);
             statsStarted = Time.realtimeSinceStartup;
         }
 
-        if(statusText)
+        if (statusText)
         {
             statusText.text = connectionStatus;
         }
 
-        if (sensorText)
+        if (sensorText && sensorPayload != null)
         {
             sensorText.text =
                 $"Sensor packet: " + latestSensorPayload;
         }
 
-        if (aiResultText)
+        if (aiResultText && latestAIResultPayload != null)
         {
-            // Display stroke names as plain text, even if they contain markup.
-            aiResultText.richText = false;
-            aiResultText.text = aiResultCount == 0
-                ? "AI results: waiting for packets..."
-                : latestAIResultSummary + "\n" +
-                  $"Last packet: {Time.realtimeSinceStartup - lastAIResultTime:F1}s ago";
+            aiResultText.text = $"AI Result: {latestAIResultPayload}";
         }
 
         if (statsText)
@@ -508,30 +549,7 @@ public class PickleVizMqttClient : MonoBehaviour
         }
     }
 
-    private static string BuildAIResultSummary(string payload)
-    {
-        try
-        {
-            var result = JsonUtility.FromJson<AIResultDisplayPacket>(payload);
-            if (result == null || string.IsNullOrWhiteSpace(result.stroke) ||
-                float.IsNaN(result.confidence) ||
-                float.IsInfinity(result.confidence) ||
-                result.confidence < 0f || result.confidence > 1f)
-                return "AI result received: missing or invalid summary fields";
-
-            string stroke = result.stroke.Replace('\r', ' ').Replace('\n', ' ').Replace('\t', ' ');
-            if (stroke.Length > 60) stroke = stroke.Substring(0, 60) + "...";
-            return $"AI result #{result.result_seq}\n" +
-                   $"Stroke: {stroke} | Confidence: {result.confidence * 100f:F0}%\n" +
-                   $"Sample pairs: {result.sample_pairs}";
-        }
-        catch (ArgumentException)
-        {
-            // A malformed packet must not break the Unity Update loop.
-            return "AI result received: invalid JSON";
-        }
-    }
-
+    // 8. Request cancellation; the connection loop releases resources in its finally block.
     private void OnApplicationQuit()
     {
         stopping = true;

@@ -1,35 +1,52 @@
+# One instance manages one FireBeetle: connect, configure, synchronise its clock,
+# decode notifications, and enqueue samples for the shared laptop synchroniser.
 import asyncio
 import logging
 import json
-import struct
 import time
 
 from bleak import BleakClient, BleakScanner
 import _bootstrap
 from utilities.constants import (
-    NOTIFY_CHAR_UUID,
-    WRITE_CHAR_UUID, 
-    SAMPLE_FREQ,
-    PKT_HELLO_REQ, 
-    PKT_HELLO, 
-    PKT_CONFIG, 
-    PKT_CONFIG_ACK, 
-    PKT_SYNC_REQ, 
-    PKT_SYNC_RESP,
-    PKT_SENSOR_BATCH,
-    PKT_SYNC_START,
-    PKT_SYNC_END,
-    PKT_HAPTIC_RESP,
-    PKT_SENSOR_DATA,
-    PKT_DUMMY,
-    PKT_DUMMY_REPLY,
-    SENSOR_BATCH_SIZE,
-    MAX_SYNC_RTT_MS,
+    PacketType,
     BLE_WRITE_TIMEOUT_SECONDS,
+    MAX_SYNC_RTT_MS,
+    NOTIFY_CHAR_UUID,
+    packet_type_name,
+    SENSOR_BATCH_SIZE,
+    SENSOR_SAMPLE_STRUCT,
+    SENSOR_SOURCES,
+    WRITE_CHAR_UUID,
 )
 
 
-SENSOR_SAMPLE_STRUCT = struct.Struct("<II6f")
+from utilities.logger_setup import format_packet_for_log
+
+# Maximum attempt durations, not fixed startup delays. A successful step returns
+# immediately; the outer connection budget also leaves time for native cleanup.
+BLE_CONNECT_TIMEOUT_SECONDS = 5.0
+BLE_SETUP_TIMEOUT_SECONDS = 5.0
+BLE_CLEANUP_TIMEOUT_SECONDS = 2.0
+
+
+# Wire layout: type/count/source (one byte each), then count little-endian
+# <II6f samples: sequence, node uptime in ms, acceleration XYZ, gyroscope XYZ.
+def decode_sensor_batch(payload):
+    """Validate a binary batch and unpack sequence, timestamp and six IMU axes."""
+    if len(payload) < 3 or payload[0] != PacketType.SENSOR_BATCH:
+        raise ValueError("expected SENSOR_BATCH (0x09)")
+
+    count = payload[1]
+    if not 1 <= count <= SENSOR_BATCH_SIZE or len(payload) != 3 + count * SENSOR_SAMPLE_STRUCT.size:
+        raise ValueError("invalid count/length (expected 3 + 32 * count bytes)")
+    source = payload[2]
+
+    if source not in SENSOR_SOURCES:
+        raise ValueError("unknown sensor source (expected 0 = normal or 1 = dummy)")
+
+    # Append the source to each unpacked sample for later identification.
+    return [(*SENSOR_SAMPLE_STRUCT.unpack_from(payload, 3 + i * SENSOR_SAMPLE_STRUCT.size), source)
+            for i in range(count)]
 
 
 class BLESensorNode:
@@ -37,24 +54,28 @@ class BLESensorNode:
     BLE sensor node that connects to FireBeetle ESP32 devices, receives IMU data, and pushes it onto an asyncio.Queue.
     """
 
-    def __init__(self, node_id: str, clock_resync: bool, queue: asyncio.Queue, logger, dummy_callback=None, streaming=True):
+    def __init__(self, node_id: str, clock_resync: bool, queue: asyncio.Queue, logger, streaming=True, connection_lock=None):
         self.node_id = node_id
         self.clock_resync = clock_resync
         self.queue = queue
         self.logger = logging.LoggerAdapter(logger, {"device": node_id})
         self.client: BleakClient | None = None
-        self.clock_offset_ms = 0.0 
+        self._last_device = None
+        self.clock_offset_ms = 0.0
+        self._clock_valid = False
+        self._setup_task = None
+        self._connection_lock = connection_lock or asyncio.Lock()
         self._sync_lock = asyncio.Lock()
         self._periodic_sync_task = None
-        self._sync_requests = {}
         self._sync_responses = {}
         self._sync_waiters = {}
         self._write_lock = asyncio.Lock()
-        self.dummy_callback = dummy_callback
+        self._capture_until = 0.0
         self.streaming = streaming
         self.ready = asyncio.Event()
         self.rx_bytes = 0
         self.rx_packets = 0
+        self._latency_request_id = 1_000_000
 
     async def _write_char_unlocked(self, payload: str, response: bool = True):
         """Write after the caller has acquired any required ordering lock."""
@@ -69,6 +90,7 @@ class BLESensorNode:
             ),
             timeout=BLE_WRITE_TIMEOUT_SECONDS,
         )
+        self.logger.debug("[BLE TX] %s", format_packet_for_log(payload))
 
     async def _write_char(self, payload: str, response: bool = True):
         async with self._write_lock:
@@ -78,69 +100,76 @@ class BLESensorNode:
 
     async def run(self):
         while True:
-            device = await BleakScanner.find_device_by_name(self.node_id, timeout=10.0)
-            if device is None:
-                self.logger.error(f"[BLE] Device not found, retrying in 3s...")
-                await asyncio.sleep(1)
-                continue
-
-            # Force state cleanup on new connection attempt
-            self.clock_offset_ms = 0.0
-            self._sync_requests = {}
-            self._sync_responses = {}
-            self._sync_waiters = {}
-            self._sync_lock = asyncio.Lock()
-
-            # Reset periodic sync task if it exists
-            if self._periodic_sync_task and not self._periodic_sync_task.done():
-                self._periodic_sync_task.cancel()
-            self._periodic_sync_task = None
-
-            self.client = BleakClient(device.address, use_services_cache=False)
+            stage = "discovery"
             try:
-                if self.client.is_connected:
-                    self.logger.warning(f"[BLE] Already connected, disconnecting first...")
-                    await self.client.disconnect()
-                
-                await self.client.connect(timeout=5.0)
-                self.logger.info("BLE connected")
-                self.logger.debug(f"Device {device.name} at {device.address}")
-                await self.client.start_notify(NOTIFY_CHAR_UUID, self._handle_notification)
-
-                hello_req = json.dumps({"type": PKT_HELLO_REQ}, separators=(",", ":"))
-                await self._write_char(hello_req)
-                self.logger.debug(f"[HELLO] Sent HELLO_REQ")
-
+                # Only setup is serialised; both established connections run together.
+                async with self._connection_lock:
+                    self.ready.clear()
+                    self.clock_offset_ms = 0.0
+                    self._clock_valid = False
+                    self._capture_until = 0.0
+                    self._sync_responses.clear()
+                    self.logger.debug("[BLE] Discovering device")
+                    device = await BleakScanner.find_device_by_name(self.node_id, timeout=10.0)
+                    if device is None:
+                        if self._last_device is None:
+                            raise ConnectionError("device not found")
+                        self.logger.warning("[BLE] No fresh advertisement; retrying previously discovered %s", self.node_id)
+                        device = self._last_device
+                        
+                    self._last_device = device
+                    stage = "connect/service discovery"
+                    self.logger.debug("[BLE] Connecting to discovered device")
+                    self.client = BleakClient(device, timeout=BLE_CONNECT_TIMEOUT_SECONDS)
+                    # Bleak's native timeout must fire first so CoreBluetooth can
+                    # cancel its pending connection. Also bound service discovery.
+                    await asyncio.wait_for(self.client.connect(),
+                        BLE_CONNECT_TIMEOUT_SECONDS + BLE_SETUP_TIMEOUT_SECONDS + BLE_CLEANUP_TIMEOUT_SECONDS)
+                    self.logger.info("BLE connected")
+                    stage = "notification subscription/HELLO/configuration/clock sync"
+                    await asyncio.wait_for(self._complete_setup(), timeout=BLE_SETUP_TIMEOUT_SECONDS)
+                    self.logger.debug("[BLE] Setup complete")
+                stage = "sampling"
                 while self.client.is_connected:
-                    await asyncio.sleep(1)  
+                    await asyncio.sleep(0.5)
 
-                self.logger.warning(f"[BLE] Connection lost, will attempt to reconnect...")
-                
-
+                self.logger.warning("[BLE] Connection lost; reconnecting")
             except asyncio.CancelledError:
-                self.logger.debug(f"[BLE] Task cancelled")
                 raise
-            except Exception as e:
-                self.logger.error(f"[BLE] Connection error: {e!r}")
+            except Exception as exc:
+                self.logger.error("[BLE] Connection error during %s: %r", stage, exc)
             finally:
                 await self.disconnect()
+            await asyncio.sleep(2)
 
-            await asyncio.sleep(2)  # Wait before attempting to reconnect
-
+    async def _complete_setup(self):
+        await self.client.start_notify(NOTIFY_CHAR_UUID, self._handle_notification)
+        await self._write_char(json.dumps({"type": PacketType.HELLO_REQ}))
+        await self.ready.wait()
 
     async def disconnect(self):
         self.ready.clear()
+        if self._setup_task:
+            self._setup_task.cancel()
+            await asyncio.gather(self._setup_task, return_exceptions=True)
+            self._setup_task = None
         if self._periodic_sync_task:
             self._periodic_sync_task.cancel()
             await asyncio.gather(self._periodic_sync_task, return_exceptions=True)
             self._periodic_sync_task = None
 
-        if self.client and self.client.is_connected:
-            self.logger.info(f"[BLE] Disconnected from device")
+        self.ready.clear()
+        for waiter in self._sync_waiters.values():
+            if not waiter.done():
+                waiter.set_exception(ConnectionError("BLE disconnected during request"))
+        self._sync_waiters.clear()
+        client, self.client = self.client, None
+        if client:
+            self.logger.debug("[BLE] Cleaning up connection attempt")
             try:
                 # Disconnect tears down notifications too; avoid a separate
                 # cancellable CoreBluetooth stop-notify operation at shutdown.
-                await self.client.disconnect()
+                await asyncio.wait_for(client.disconnect(), timeout=BLE_CLEANUP_TIMEOUT_SECONDS)
             except Exception as e:
                 self.logger.debug(f"[BLE] stop_notify or disconnect skipped/failed on disconnect: {e!r}")
 
@@ -148,59 +177,54 @@ class BLESensorNode:
     async def _handle_notification(self, sender, data: bytearray):
         self.rx_bytes += len(data)
         self.rx_packets += 1
-        if len(data) >= 2 and data[0] == PKT_SENSOR_BATCH:
-            sample_count = data[1]
-            if not 1 <= sample_count <= SENSOR_BATCH_SIZE:
-                self.logger.warning(f"[DATA] Invalid batch count: {sample_count}")
-                return
-            
-            expected_length = 2 + sample_count * SENSOR_SAMPLE_STRUCT.size
-            if len(data) != expected_length:
-                self.logger.warning(
-                    f"[DATA] Invalid batch length: "
-                    f"received={len(data)}, expected={expected_length}"
-                )
+        if data and data[0] == PacketType.SENSOR_BATCH:
+            try:
+                samples = decode_sensor_batch(data)
+            except ValueError as exc:
+                self.logger.warning(f"[DATA] Rejected sensor batch: {exc}")
                 return
 
-            for index in range(sample_count):
-                offset = 2 + index * SENSOR_SAMPLE_STRUCT.size
-                sample = SENSOR_SAMPLE_STRUCT.unpack_from(data, offset)
+            self.logger.debug(
+                "[SENSOR RX] type=%s source=%s count=%d bytes=%d",
+                packet_type_name(data[0]), SENSOR_SOURCES[data[2]], len(samples), len(data),
+            )
+            for sample in samples:
+                self.logger.debug(
+                    "[SENSOR RX] source=%s sequence=%d timestamp_ms=%d "
+                    "acceleration=(x=%.6g, y=%.6g, z=%.6g) "
+                    "gyroscope=(x=%.6g, y=%.6g, z=%.6g)", SENSOR_SOURCES[sample[-1]], *sample[:-1],
+                )
                 self._enqueue_sensor_sample(*sample)
             return
-    
+
         try:
             raw = json.loads(data.decode())
             packet_type = raw.get("type")
+            self.logger.debug("[BLE RX] %s", format_packet_for_log(raw))
 
-            if packet_type == PKT_DUMMY_REPLY:
-                self.logger.debug(f"[DUMMY] Reply: {raw}")
-                if self.dummy_callback:
-                    self.dummy_callback(raw)
-                return
-
-            if packet_type == PKT_HELLO:
-                self.logger.debug(f"[RECV - HELLO] Received HELLO: {raw}")
-                self._hello_received = True
+            if packet_type == PacketType.HELLO:
+                if raw.get("node_id", self.node_id) != self.node_id:
+                    self.logger.error("[BLE] Expected %s, received HELLO from %s", self.node_id, raw.get("node_id"))
+                    await self.client.disconnect()
+                    return
+                self.logger.debug(f"[RECV - HELLO] Received HELLO: {format_packet_for_log(raw)}")
                 config = json.dumps({
-                    "type": PKT_CONFIG, 
-                    "sample_rate_hz": SAMPLE_FREQ,
-                    "sync_reference_time": 0
+                    "type": PacketType.CONFIG,
+                    "continuous": self.streaming
                 }, separators=(",", ":"))
                 await self._write_char(config)
                 self.logger.debug(f"[CONFIG] Sent CONFIG")
-                return 
+                return
 
-            if packet_type == PKT_CONFIG_ACK:
-                if not self.streaming:
-                    asyncio.create_task(self._synchronise_clock(5))
-                    return
+            if packet_type == PacketType.CONFIG_ACK:
                 self.logger.debug(
                     f"[RECV - CONFIG] Received CONFIG_ACK - starting clock sync"
                 )
-                asyncio.create_task(self._synchronise_clock(5))
+                if self._setup_task is None or self._setup_task.done():
+                    self._setup_task = asyncio.create_task(self._initial_clock_sync())
                 return
 
-            if packet_type == PKT_SYNC_RESP:
+            if packet_type == PacketType.SYNC_RESP:
                 request_id = raw.get("request_id")
                 waiter = self._sync_waiters.get(request_id)
                 if waiter is not None and not waiter.done():
@@ -210,20 +234,23 @@ class BLESensorNode:
                 self.logger.debug(f"[RECV - SYNC] Received SYNC_RESP")
                 return
 
-            if packet_type == PKT_HAPTIC_RESP:
+            if packet_type == PacketType.HAPTIC_RESP:
                 self.logger.info(f"Haptic response: {raw.get('status', 'unknown')}")
-                self.logger.debug(f"[RECV - HAPTIC] Received HAPTIC_RESP: {raw}")
+                self.logger.debug(f"[RECV - HAPTIC] Received HAPTIC_RESP: {format_packet_for_log(raw)}")
                 return
 
-            self.logger.debug(f"[RECV - UNHANDLED] Unhandled packet: {data}")
-        except json.JSONDecodeError:
+            self.logger.debug(f"[RECV - UNHANDLED] Unhandled packet: {format_packet_for_log(raw)}")
+        except (json.JSONDecodeError, UnicodeDecodeError, AttributeError):
             self.logger.error(f"[RECV - MALFORMED] Malformed packet: {data}")
 
-    def _enqueue_sensor_sample(self, sequence, raw_ts, ax, ay, az, gx, gy, gz):
+    # Offset = node clock minus laptop clock, so subtract it to pair both boards
+    # on the laptop monotonic timebase. Neither clock is a UTC timestamp.
+    def _enqueue_sensor_sample(self, sequence, raw_ts, ax, ay, az, gx, gy, gz, source):
         """Convert one binary sample and enqueue it without spawning a task."""
         packet = {
-            "type": PKT_SENSOR_DATA,
+            "type": PacketType.SENSOR_DATA,
             "node": self.node_id,
+            "source": SENSOR_SOURCES[source],
             "sequence": sequence,
             "raw_timestamp": float(raw_ts),
             "common_timestamp": float(raw_ts) - self.clock_offset_ms,
@@ -231,13 +258,19 @@ class BLESensorNode:
             "acceleration": {"x": ax, "y": ay, "z": az},
             "gyroscope": {"x": gx, "y": gy, "z": gz},
         }
-        if not self.streaming:
-            self.logger.debug(f"[DATA] Triggered sensor sample: {packet}")
-            if self.dummy_callback:
-                self.dummy_callback(packet)
-        else:
-            self.queue.put_nowait(packet)
+        self.queue.put_nowait(packet)
 
+
+    async def _initial_clock_sync(self):
+        try:
+            for _ in range(3):
+                await self._synchronise_clock(5)
+                if self.ready.is_set():
+                    return
+                await asyncio.sleep(0.2)
+            self.logger.error("[CLOCK SYNC] Setup has no valid clock; reconnecting after setup timeout")
+        except Exception as exc:
+            self.logger.error("[CLOCK SYNC] Setup failed: %r", exc)
 
     async def _synchronise_clock(self, rounds: int = 3):
         """Estimate node_clock - laptop_monotonic_clock using lowest RTT."""
@@ -246,15 +279,17 @@ class BLESensorNode:
             # pause/probe/resume session. Haptic writes cannot interleave with
             # clock synchronisation or leave the FireBeetle paused.
             async with self._write_lock:
+                # Recheck after acquiring the lock: a capture may have been
+                # scheduled while this resync was waiting behind a BLE write.
+                if time.monotonic() < self._capture_until:
+                    return
+                self.ready.clear()
                 await self._synchronise_clock_locked(rounds)
 
     async def _synchronise_clock_locked(self, rounds: int):
-        self._sync_requests = {}
         self._sync_responses = {request_id: None for request_id in range(rounds)}
-        self._sync_waiters = {}
-
-        pause_request = json.dumps({"type": PKT_SYNC_START}, separators=(",", ":"))
-        resume_request = json.dumps({"type": PKT_SYNC_END if self.streaming else PKT_SYNC_START}, separators=(",", ":"))
+        pause_request = json.dumps({"type": PacketType.SYNC_START}, separators=(",", ":"))
+        resume_request = json.dumps({"type": PacketType.SYNC_END}, separators=(",", ":"))
 
         try:
             pause_started = time.monotonic_ns() / 1e6
@@ -266,34 +301,11 @@ class BLESensorNode:
             )
 
             for request_id in range(rounds):
-                loop = asyncio.get_running_loop()
-                waiter = loop.create_future()
-                self._sync_waiters[request_id] = waiter
-
-                t1 = time.monotonic_ns() / 1e6
-                self._sync_requests[request_id] = t1
-                request = json.dumps({
-                    "type": PKT_SYNC_REQ,
-                    "request_id": request_id,
-                }, separators=(",", ":"))
-
                 try:
-                    await self._write_char_unlocked(request)
-                    t2 = time.monotonic_ns() / 1e6
-                except Exception as e:
-                    self.logger.warning(
-                        f"[CLOCK SYNC] "
-                        f"SYNC_REQ #{request_id} write failed: {e}"
-                    )
-                    continue
-
-                try:
-                    node_ts, t4 = await asyncio.wait_for(waiter, timeout=0.5)
-                except asyncio.TimeoutError:
-                    self.logger.warning(
-                        f"[CLOCK SYNC] "
-                        f"SYNC_REQ #{request_id} timed out"
-                    )
+                    node_ts, t1, t2, t4 = await self._request_sync_reply(
+                        request_id, self._write_char_unlocked, timeout=0.5)
+                except Exception as exc:
+                    self.logger.warning("[CLOCK SYNC] SYNC_REQ #%d failed: %r", request_id, exc)
                     continue
 
                 rtt = t4 - t1
@@ -311,7 +323,6 @@ class BLESensorNode:
                     f"RTT={rtt:.2f}ms, write_wait={write_wait:.2f}ms, "
                     f"response_wait={response_wait:.2f}ms"
                 )
-                # await asyncio.sleep(0.02)
 
             valid = [
                 value for value in self._sync_responses.values()
@@ -333,6 +344,7 @@ class BLESensorNode:
                         + (1 - alpha) * self.clock_offset_ms
                     )
 
+                self._clock_valid = True
                 self.logger.info(f"Clock synchronised: best RTT={rtt:.2f}ms")
                 self.logger.debug(
                     f"[CLOCK SYNC] Clock offset="
@@ -350,15 +362,16 @@ class BLESensorNode:
                 )
         finally:
             try:
-                await self._write_char_unlocked(resume_request)
-                self.logger.info("[CLOCK SYNC] Streaming resumed" if self.streaming else "[CLOCK SYNC] Keyboard ready; streaming remains paused")
-                self.ready.set()
+                if self._clock_valid:
+                    await self._write_char_unlocked(resume_request)
+                    self.logger.info("[CLOCK SYNC] Streaming resumed" if self.streaming else "[CLOCK SYNC] Keyboard ready; sampler idle until capture")
+                    self.ready.set()
             except Exception as e:
                 self.logger.warning(
                     f"[CLOCK SYNC] Failed to resume streaming: {e}"
                 )
 
-        if self.clock_resync and (self._periodic_sync_task is None or self._periodic_sync_task.done()):
+        if self._clock_valid and self.clock_resync and (self._periodic_sync_task is None or self._periodic_sync_task.done()):
             self._periodic_sync_task = asyncio.create_task(
                 self._periodic_clock_sync()
             )
@@ -373,7 +386,7 @@ class BLESensorNode:
         await asyncio.sleep(first_delay)
 
         while self.client and self.client.is_connected:
-            if self.client and self.client.is_connected:
+            if self.client and self.client.is_connected and time.monotonic() >= self._capture_until:
                 try:
                     self.logger.debug(f"[CLOCK SYNC] Performing periodic clock sync...")
                     await self._synchronise_clock()
@@ -388,7 +401,7 @@ class BLESensorNode:
         try:
             await self._write_char(haptic_json)
             self.logger.debug(
-                f"[HAPTIC] Sent HAPTIC_CMD: {haptic_json}"
+                f"[HAPTIC] Sent HAPTIC_CMD: {format_packet_for_log(haptic_json)}"
             )
             return True
         except asyncio.CancelledError:
@@ -399,17 +412,52 @@ class BLESensorNode:
             )
             return False
 
-    async def send_dummy(self, key: str, sequence: int):
-        packet = json.dumps({
-            "type": PKT_DUMMY, 
-            "key": key, 
-            "sequence": sequence,
-            "sent_ms": time.monotonic_ns() // 1_000_000
-            }, separators=(",", ":"))
+    async def send_capture(self, start_ms: float):
+        """Schedule a one-second burst, decoded just like continuous samples."""
         try:
-            await self._write_char(packet)
-            self.logger.debug(f"[DUMMY] Sent dummy packet: {packet}")
+            async with self._write_lock:
+                if not self.ready.is_set() or time.monotonic_ns() / 1e6 >= start_ms:
+                    return False
+                self._capture_until = start_ms / 1000 + 1.1
+                packet = json.dumps({
+                    "type": PacketType.DUMMY,
+                    "start_timestamp": round(start_ms + self.clock_offset_ms) & 0xFFFFFFFF,
+                }, separators=(",", ":"))
+                await self._write_char_unlocked(packet)
             return True
-        except Exception as e:
-            self.logger.warning(f"[DUMMY] Send failed: {e!r}")
+        except Exception as exc:
+            self.logger.warning(f"[CAPTURE] Send failed: {exc!r}")
             return False
+
+    # Register before writing: a notification may arrive before the write await
+    # returns. Request IDs keep clock-sync and diagnostic replies separate.
+    async def _request_sync_reply(self, request_id, write, timeout):
+        """Shared timed request/reply for clock synchronisation and BLE RTT."""
+        waiter = asyncio.get_running_loop().create_future()
+        self._sync_waiters[request_id] = waiter
+        try:
+            started = time.monotonic_ns() / 1e6
+            await write(json.dumps({"type": PacketType.SYNC_REQ, "request_id": request_id}))
+            written = time.monotonic_ns() / 1e6
+            node_ts, received = await asyncio.wait_for(waiter, timeout)
+            return node_ts, started, written, received
+        finally:
+            self._sync_waiters.pop(request_id, None)
+            if not waiter.done():
+                waiter.cancel()
+            elif not waiter.cancelled():
+                waiter.exception()  # Consume a disconnect error even if the write failed first.
+
+    async def measure_latency(self):
+        """Ping the node; RTT is reply time minus send time on the laptop clock."""
+        if not self.ready.is_set() or time.monotonic() < self._capture_until:
+            return
+        self._latency_request_id += 1
+        try:
+            # _write_char locks only the write, not the wait for the reply.
+            _, started, _, received = await self._request_sync_reply(
+                self._latency_request_id, self._write_char, timeout=1.0)
+            self.logger.debug("[LATENCY] laptop <-> %s BLE: RTT=%.2fms",
+                             self.node_id, received - started)
+        except Exception as exc:
+            self.logger.debug("[LATENCY] BLE probe failed: %r", exc)

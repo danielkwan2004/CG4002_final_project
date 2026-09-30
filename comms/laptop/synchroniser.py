@@ -1,14 +1,19 @@
+# Pair samples only within the same source (stream or dummy). Both sources use
+# identical matching rules and produce the same MQTT payload schema.
 import asyncio
 import uuid
 from collections import deque
 import _bootstrap
-from utilities.constants import PKT_SENSOR_DATA
+from utilities.constants import (PacketType, SENSOR_SOURCES)
 
 
 def paired_sensor_packet(forearm, paddle, sensor_seq, session_id):
     """Shared payload for continuous and keyboard-triggered sensor pairs."""
+    if forearm["source"] != paddle["source"]:
+        raise ValueError("Cannot pair normal and dummy samples")
     return {
-        "type": PKT_SENSOR_DATA,
+        "type": PacketType.SENSOR_DATA,
+        "source": forearm["source"],
         "sensor_seq": sensor_seq,
         "session_id": session_id,
         "timestamp": int(round(min(forearm["common_timestamp"], paddle["common_timestamp"]))),
@@ -28,18 +33,16 @@ class Synchroniser:
         paddle_queue,
         output_queue,
         logger,
-        tolerance_ms=2.5,
-        buffer_window_ms=50.0
+        tolerance_ms=2.5
     ):
         self.forearm_queue = forearm_queue
         self.paddle_queue = paddle_queue
         self.output_queue = output_queue
         self.logger = logger
         self.tolerance_ms = tolerance_ms
-        self.buffer_window_ms = buffer_window_ms
         self.max_buffer_len = 200   # 1 sec worth of samples at 200Hz
-        self.forearm_buffer = deque(maxlen=self.max_buffer_len)
-        self.paddle_buffer = deque(maxlen=self.max_buffer_len)
+        self.forearm_buffer = {source: deque(maxlen=self.max_buffer_len) for source in SENSOR_SOURCES.values()}
+        self.paddle_buffer = {source: deque(maxlen=self.max_buffer_len) for source in SENSOR_SOURCES.values()}
         self.matched_count = 0
         self.session_id = uuid.uuid4().hex
         self.unmatched_forearm = 0
@@ -51,8 +54,7 @@ class Synchroniser:
 
     async def run(self):
         self.logger.debug(
-            f"FireBeetle synchroniser waiting for samples: tolerance = {self.tolerance_ms}ms, "
-            f"window = {self.buffer_window_ms}ms"
+            f"FireBeetle synchroniser waiting for samples: tolerance = {self.tolerance_ms}ms"
         )
         forearm_get = asyncio.create_task(self.forearm_queue.get())
         paddle_get = asyncio.create_task(self.paddle_queue.get())
@@ -63,10 +65,12 @@ class Synchroniser:
                     return_when=asyncio.FIRST_COMPLETED,
                 )
                 if forearm_get in done:
-                    self.forearm_buffer.append(forearm_get.result())
+                    sample = forearm_get.result()
+                    self.forearm_buffer[sample["source"]].append(sample)
                     forearm_get = asyncio.create_task(self.forearm_queue.get())
                 if paddle_get in done:
-                    self.paddle_buffer.append(paddle_get.result())
+                    sample = paddle_get.result()
+                    self.paddle_buffer[sample["source"]].append(sample)
                     paddle_get = asyncio.create_task(self.paddle_queue.get())
                 await self._match_available()
         finally:
@@ -74,13 +78,21 @@ class Synchroniser:
             paddle_get.cancel()
 
     async def _match_available(self):
-        while self.forearm_buffer and self.paddle_buffer:
+        for source in SENSOR_SOURCES.values():
+            await self._match_source(source)
+
+    # Match the oldest available timestamp to the closest sample on the other
+    # board. Unmatched older samples are discarded rather than interpolated.
+    async def _match_source(self, source):
+        forearm_buffer = self.forearm_buffer[source]
+        paddle_buffer = self.paddle_buffer[source]
+        while forearm_buffer and paddle_buffer:
             # anchor on whichever side's oldest sample is older
-            if self._ts(self.forearm_buffer[0]) <= self._ts(self.paddle_buffer[0]):
-                anchor_buffer, search_buffer = self.forearm_buffer, self.paddle_buffer
+            if self._ts(forearm_buffer[0]) <= self._ts(paddle_buffer[0]):
+                anchor_buffer, search_buffer = forearm_buffer, paddle_buffer
                 anchor_is_forearm = True
             else:
-                anchor_buffer, search_buffer = self.paddle_buffer, self.forearm_buffer
+                anchor_buffer, search_buffer = paddle_buffer, forearm_buffer
                 anchor_is_forearm = False
 
             anchor = anchor_buffer[0]
@@ -123,6 +135,6 @@ class Synchroniser:
             "received_paddle": self.matched_count + self.unmatched_paddle,
             "unmatched_forearm": self.unmatched_forearm,
             "unmatched_paddle": self.unmatched_paddle,
-            "forearm_buffer": len(self.forearm_buffer),
-            "paddle_buffer": len(self.paddle_buffer),
+            "forearm_buffer": sum(map(len, self.forearm_buffer.values())),
+            "paddle_buffer": sum(map(len, self.paddle_buffer.values())),
         }

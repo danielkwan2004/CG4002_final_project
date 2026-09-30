@@ -1,3 +1,5 @@
+# MQTT demo consumer: collect separate stream/dummy windows and publish results.
+# Stroke/confidence values below are simulated; no trained model is called here.
 import argparse
 import json
 import os
@@ -8,19 +10,16 @@ import uuid
 
 import _bootstrap
 from utilities.constants import (
+    PacketType,
     CA_CERTS_PATH,
     HAPTIC_MIN_INTERVAL_SECONDS,
     HAPTIC_RESULTS_PER_TRIGGER,
-    PKT_AI_RESULTS,
-    PKT_DUMMY_BATCH,
-    PKT_HAPTIC_CMD,
-    PKT_SENSOR_DATA,
     PORT_TLS,
+    SENSOR_SOURCES,
     STROKES,
     TOPIC_HAPTICS,
     TOPIC_RESULTS,
     TOPIC_SENSOR,
-    TOPIC_RELAY,
     TRANSPORT_TLS,
 )
 from dotenv import load_dotenv
@@ -56,28 +55,33 @@ result_lock = threading.Lock()
 haptic_seq = 0
 results_since_haptic = 0
 last_haptic_time = float("-inf")
-sensor_window = []
-sensor_window_lock = threading.Lock()
-sensor_window_changed = threading.Condition(sensor_window_lock)
-sensor_deadline = None
-sensor_last_sequence = 0
-relay_session = None
-relay_last_sequence = -1
+# Windows contain one second of acquisition timestamps, not one second of
+# MQTT arrivals. Zero delivery grace favours fast results over late samples.
+SENSOR_WINDOW_MS = 1000
+WINDOW_DELIVERY_GRACE_SECONDS = 0.0
+sensor_windows = {source: {} for source in SENSOR_SOURCES.values()}
+sensor_latest_start = {source: None for source in SENSOR_SOURCES.values()}
+sensor_closed_until = {source: float("-inf") for source in SENSOR_SOURCES.values()}
+# MQTT callbacks and the timer loop run on different threads. The condition
+# protects window state; result_lock separately serialises result/haptic counters.
+sensor_window_changed = threading.Condition()
+sensor_session = None
 
 
 def publish_ai_result(stroke, confidence, pairs):
     """Use the same AI result schema for streaming and keyboard demos."""
     global result_seq, results_since_haptic, haptic_seq, last_haptic_time
+    source = pairs[-1]["source"]
     sensor_seq = pairs[-1]["sensor_seq"]
     sensor_session_id = pairs[-1]["session_id"]
     with result_lock:
         result_seq += 1
         result = {
-            "type": PKT_AI_RESULTS,
+            "type": PacketType.AI_RESULTS,
+            "source": source,
             "timestamp": time.monotonic_ns() // 1_000_000,
             "session_id": result_session_id,
             "sensor_session_id": sensor_session_id,
-            "sensor_seqs": [pair["sensor_seq"] for pair in pairs],
             "result_seq": result_seq,
             "sensor_seq": sensor_seq,
             "stroke": stroke,
@@ -85,17 +89,23 @@ def publish_ai_result(stroke, confidence, pairs):
             "sample_pairs": len(pairs),
         }
 
-        client.publish(TOPIC_RESULTS, result, qos=1)
-        logger.info(f"Published AI result #{result_seq}: sensor_seq = {sensor_seq}, stroke = {stroke}")
+        if not client.publish(TOPIC_RESULTS, result, qos=1):
+            logger.info("Dropped AI result while MQTT is unavailable")
+            return
+        logger.info(f"Published AI result #{result_seq}: source = {source}, sensor_seq = {sensor_seq}, sample_pairs = {len(pairs)}, stroke = {stroke}")
 
-        # trigger haptic packet after 10 AI results, at least 10 seconds since last haptic
+        # Dummy results never trigger haptics or advance the stream-result counter.
+        if source == "dummy":
+            return
+
+        # Trigger after 10 streaming AI results, at least 10 seconds since last haptic.
         results_since_haptic += 1
         now = time.monotonic()
         if (results_since_haptic >= HAPTIC_RESULTS_PER_TRIGGER
                 and now - last_haptic_time >= HAPTIC_MIN_INTERVAL_SECONDS):
             haptic_seq += 1
             client.publish(TOPIC_HAPTICS, {
-                "type": PKT_HAPTIC_CMD,
+                "type": PacketType.HAPTIC_CMD,
                 "timestamp": time.monotonic_ns() // 1_000_000,
                 "session_id": result_session_id,
                 "sensor_session_id": sensor_session_id,
@@ -110,123 +120,91 @@ def publish_ai_result(stroke, confidence, pairs):
 
 
 def publish_sensor_window():
-    """Drain a due window; an empty interval disarms the timer."""
-    global sensor_deadline
-    with sensor_window_lock:
+    """Publish each expired window once; late pairs cannot reopen it."""
+    due = []
+    with sensor_window_changed:
         now = time.monotonic()
-        if sensor_deadline is None or now < sensor_deadline:
-            return
-        
-        count = len(sensor_window)
-        pairs = list(sensor_window)
-        sensor_window.clear()
-        sensor_deadline = max(sensor_deadline + 1.0, now) if count else None
-
-    if count:
-        publish_ai_result(random.choice(STROKES), round(random.uniform(0.75, 0.99), 2),
-                          pairs)
+        for source, windows in sensor_windows.items():
+            for start, window in list(windows.items()):
+                if now < window["deadline"]:
+                    continue
+                due.append(window["pairs"])
+                del windows[start]
+                sensor_closed_until[source] = max(sensor_closed_until[source], start + SENSOR_WINDOW_MS)
+    for pairs in due:
+        if pairs:
+            publish_ai_result(random.choice(STROKES), round(random.uniform(0.75, 0.99), 2), pairs)
 
 
 def handle_sensor_data(msg):
-    global sensor_last_sequence, sensor_deadline
-
+    global sensor_session
     try:
         sensor = json.loads(msg.payload.decode())
     except (ValueError, UnicodeDecodeError):
         logger.warning("Ignoring malformed sensor packet")
         return
-    if (not isinstance(sensor, dict) or sensor.get("type") != PKT_SENSOR_DATA
+    if (not isinstance(sensor, dict) or sensor.get("type") != PacketType.SENSOR_DATA
+            or sensor.get("source") not in SENSOR_SOURCES.values()
             or not isinstance(sensor.get("session_id"), str) or not sensor["session_id"]
-            or type(sensor.get("sensor_seq")) is not int or sensor["sensor_seq"] < 1):
-        logger.warning("Ignoring sensor packet without a valid sensor_seq; update laptop")
+            or type(sensor.get("sensor_seq")) is not int or sensor["sensor_seq"] < 1
+            or type(sensor.get("timestamp")) is not int):
+        logger.warning("Ignoring sensor packet without a valid source/session/sequence/timestamp")
         return
 
-    logger.debug(
-        f"Received sensor packet #{sensor['sensor_seq']}: ({len(msg.payload)} bytes)"
-    )
-
+    # Enforce the deadline on receipt too, even if the timer thread has not run.
+    # A late tail must not reopen the completed dummy window as a second result.
+    publish_sensor_window()
     with sensor_window_changed:
-        if sensor_window and sensor_window[-1]["session_id"] != sensor["session_id"]:
-            logger.warning("Laptop session changed; discarding partial sensor window")
-            sensor_window.clear()
-            sensor_deadline = None
-        sensor_window.append(sensor)
-        sensor_last_sequence = sensor["sensor_seq"]
-        if sensor_deadline is None:
-            sensor_deadline = time.monotonic() + 1.0
-            sensor_window_changed.notify()
-
-
-
-def handle_dummy_relay(msg):
-    """One complete keypress batch produces one simulated AI result."""
-    global relay_session, relay_last_sequence
-
-    try:
-        relay = json.loads(msg.payload.decode())
-    except (ValueError, UnicodeDecodeError):
-        logger.warning("Ignoring malformed dummy relay")
-        return
-    
-    if (not isinstance(relay, dict) or relay.get("type") != PKT_DUMMY_BATCH
-            or not isinstance(relay.get("pairs"), list)
-            or not 1 <= len(relay["pairs"]) <= 1000
-            or relay.get("sample_pairs") != len(relay["pairs"])
-            or not isinstance(relay.get("session"), str)
-            or not isinstance(relay.get("sequence"), int)):
-        logger.warning("Ignoring unpaired dummy packet; update the laptop pipeline")
-        return
-    
-    pairs = relay["pairs"]
-    logger.info(f"Received dummy relay packet: {len(pairs)} sample pairs")
-
-    for index, pair in enumerate(pairs):
-        expected = relay["sequence"] - len(pairs) + 1 + index
-        if (not isinstance(pair, dict) or pair.get("type") != PKT_SENSOR_DATA
-                or pair.get("session_id") != relay["session"]
-                or type(pair.get("sensor_seq")) is not int
-                or pair["sensor_seq"] != expected
-                or pair.get("forearm_seq") != expected
-                or pair.get("paddle_seq") != expected
-                or not isinstance(pair.get("timestamp"), (int, float))
-                or any(not isinstance(pair.get(node), dict)
-                       or any(not isinstance(pair[node].get(field), dict)
-                              or set(pair[node][field]) != {"x", "y", "z"}
-                              for field in ("acceleration", "gyroscope"))
-                       for node in ("forearm", "paddle"))):
-            logger.warning("Ignoring incomplete or mismatched keypress batch")
+        if sensor_session != sensor["session_id"]:
+            for source in sensor_windows:
+                sensor_windows[source].clear()
+                sensor_latest_start[source] = None
+                sensor_closed_until[source] = float("-inf")
+            sensor_session = sensor["session_id"]
+        source = sensor["source"]
+        timestamp = sensor["timestamp"]
+        if timestamp < sensor_closed_until[source]:
+            # A very late tail cannot reopen a finished window as another inference.
+            logger.debug("Discarding late %s pair %d from a closed acquisition window", source, sensor["sensor_seq"])
             return
-        
-    if relay_session != relay["session"]:
-        relay_session = relay["session"]
-        relay_last_sequence = -1
-
-    if relay["sequence"] <= relay_last_sequence:
-        return  # QoS 1 may redeliver an already collected pair.
-    
-    relay_last_sequence = relay["sequence"]
-
-    logger.debug(
-        f"Keyboard batch={relay.get('batch_id')} key={relay.get('key')!r} "
-        f"sequences={pairs[0]['forearm_seq']}..{relay['sequence']}"
-    )
-    publish_ai_result(random.choice(STROKES), round(random.uniform(0.75, 0.99), 2),
-                      pairs)
+        windows = sensor_windows[source]
+        start = next((start for start in windows if start <= timestamp < start + SENSOR_WINDOW_MS), None)
+        if start is None:
+            previous = sensor_latest_start[source]
+            if previous is not None and timestamp < previous:
+                logger.debug("Discarding out-of-order pair before the current acquisition window")
+                return
+            if source == "stream" and previous is not None:
+                # Preserve contiguous acquisition windows even when MQTT delivers a backlog.
+                start = previous + ((timestamp - previous) // SENSOR_WINDOW_MS) * SENSOR_WINDOW_MS
+            else:
+                # Each keyboard burst lasts <= 1 second and keys cannot overlap.
+                # Its first available pair anchors the window.
+                start = timestamp
+            sensor_latest_start[source] = start
+            # Bound samples by acquisition timestamp, but schedule expiration
+            # using this machine's monotonic clock. The clocks need not agree.
+            windows[start] = {
+                "pairs": [],
+                "deadline": time.monotonic() + (start + SENSOR_WINDOW_MS - timestamp) / 1000
+                            + WINDOW_DELIVERY_GRACE_SECONDS,
+            }
+        windows[start]["pairs"].append(sensor)
+        sensor_window_changed.notify()
 
 
 client.subscribe(TOPIC_SENSOR, callback=handle_sensor_data, qos=0)
-client.subscribe(TOPIC_RELAY, callback=handle_dummy_relay, qos=1)
+client.enable_latency("ultra96")
 
 try:
     client.loop_start()
-    logger.info("Waiting for sensor data; first sample starts a 1-second AI window")
+    logger.info("Waiting for sensor data; one-second acquisition windows with %.0fms delivery allowance",
+                WINDOW_DELIVERY_GRACE_SECONDS * 1000)
     while True:
         with sensor_window_changed:
-            if sensor_deadline is None:
-                sensor_window_changed.wait(timeout=0.5)
-            else:
-                timeout = min(0.5, max(0.0, sensor_deadline - time.monotonic()))
-                sensor_window_changed.wait(timeout=timeout)
+            deadlines = [window["deadline"] for windows in sensor_windows.values() for window in windows.values()]
+            timeout = min(0.5, max(0.0, min(deadlines) - time.monotonic())) if deadlines else 0.5
+            sensor_window_changed.wait(timeout=timeout)
         publish_sensor_window()
 except KeyboardInterrupt:
     logger.info("Interrupted - disconnecting from MQTT")

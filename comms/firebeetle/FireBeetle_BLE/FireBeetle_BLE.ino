@@ -1,4 +1,5 @@
-// Streaming and keyboard-demo firmware.
+// Sensor firmware: JSON controls arrive over BLE writes; sensor readings
+// leave as binary notifications. Set NODE_ID separately when flashing each board.
 #include <NimBLEDevice.h>
 #include <ArduinoJson.h>
 
@@ -6,7 +7,7 @@
 #define NOTIFY_CHAR_UUID    "2F752BBE-B112-4F11-9789-093262B39116"
 #define WRITE_CHAR_UUID     "A9A6FB55-B997-4A3B-A9FA-D97C1E23DB5F"
 
-#define NODE_ID "forearm" // "forearm" or "paddle"
+#define NODE_ID "paddle" // flash with "forearm" or "paddle"
 
 enum PacketType : uint8_t {
     PKT_HELLO_REQ    = 0x01,
@@ -25,7 +26,6 @@ enum PacketType : uint8_t {
     PKT_HAPTIC_RESP  = 0X0D,
 
     PKT_DUMMY        = 0x0E,
-    PKT_DUMMY_REPLY  = 0x0F,
 };
 
 constexpr uint8_t SENSOR_BATCH_SIZE = 5;
@@ -33,13 +33,13 @@ constexpr uint8_t SENSOR_BATCH_SIZE = 5;
 enum ConnState { DISCONNECTED, CONNECTED, HELLO_SENT, CONFIGURED, SYNCHRONISED };
 volatile ConnState state = DISCONNECTED;
 
-volatile uint32_t connectedAt = 0;
-
+// Handshake
 volatile bool pendingHello = false;
 volatile bool pendingConfigAck = false;
 volatile bool pendingHapticAck = false;
 volatile bool pendingSyncResp = false;
 
+// Clock syncing
 volatile uint32_t syncRequestId = 0;
 volatile uint32_t syncNodeTimestamp = 0;
 volatile bool streamingPaused = true;
@@ -47,8 +47,22 @@ volatile bool streamingPaused = true;
 NimBLECharacteristic* notifyChar;
 NimBLECharacteristic* writeChar;
 uint32_t seq = 0;
-int configuredSampleRate = 200;
 
+// 200 Hz sampling frequency
+constexpr uint32_t SAMPLE_INTERVAL_MS = 5;
+
+// Keystroke capture
+constexpr uint32_t CAPTURE_DURATION_MS = 1000;
+
+volatile bool continuousSampling = true;
+volatile bool capturePending = false;
+volatile uint32_t captureStart = 0;
+volatile bool resetSensorBuffers = false;
+uint32_t nextSampleAt = 0;
+uint32_t nextCaptureAt = 0;
+
+// Match Python <II6f exactly: no padding, milliseconds since boot, six float32s.
+// Sequence is shared across stream and dummy, so either source alone can have gaps.
 struct __attribute__((packed)) SensorSample {
     uint32_t sequence;
     uint32_t timestamp;
@@ -56,28 +70,108 @@ struct __attribute__((packed)) SensorSample {
     float gyro[3];
 };
 
+// Source tags the entire batch. Stream and dummy use separate batch buffers,
+// so the laptop never has to infer the source from sensor values.
 struct __attribute__((packed)) SensorBatchPayload {
     uint8_t type = PKT_SENSOR_BATCH;
     uint8_t count = 0;
+    uint8_t source = 0; // 0 = normal, 1 = dummy;
     SensorSample samples[SENSOR_BATCH_SIZE];
 };
 
 static_assert(sizeof(SensorSample) == 32, "Unexpected sensor sample layout");
-static_assert(sizeof(SensorBatchPayload) == 2 + SENSOR_BATCH_SIZE * 32, "Unexpected sensor batch layout");
+static_assert(sizeof(SensorBatchPayload) == 3 + SENSOR_BATCH_SIZE * 32, "Unexpected sensor batch layout");
 
-SensorBatchPayload sensorBatch;
+SensorBatchPayload sensorBatches[2]; // Independent normal and dummy buffers
+
+// Buffer temporary BLE backpressure without blocking the 5 ms sampler.
+// Both sources use this FIFO, preserving order within each source.
+// This bounded queue absorbs short congestion; it cannot guarantee delivery.
+// A full queue drops a batch, and the receiver may discard late queued samples.
+constexpr uint8_t TX_QUEUE_SIZE = 64;
+struct Notification {
+    uint8_t bytes[sizeof(SensorBatchPayload)];
+    size_t length;
+};
+Notification txQueue[TX_QUEUE_SIZE];
+uint8_t txHead = 0, txCount = 0;
+uint32_t nextNotifyAt = 0;
+uint32_t droppedBatches = 0;
+
+bool queueNotification(const void* data, size_t length) {
+    if (txCount == TX_QUEUE_SIZE) return false;
+    Notification& item = txQueue[(txHead + txCount) % TX_QUEUE_SIZE];
+    memcpy(item.bytes, data, length);
+    item.length = length;
+    ++txCount;
+    return true;
+}
+
+void pumpNotifications(uint32_t now) {
+    if (!txCount || static_cast<int32_t>(now - nextNotifyAt) < 0) return;
+    Notification& item = txQueue[txHead];
+    if (notifyChar->notify(item.bytes, item.length)) {
+        txHead = (txHead + 1) % TX_QUEUE_SIZE;
+        --txCount;
+    }
+    // A failed notify stays queued; never spin or block the sampler waiting for BLE.
+    nextNotifyAt = now + 2;
+}
+
+void sendSensorBatch(SensorBatchPayload& sensorBatch) {
+    const size_t length = 3 + sensorBatch.count * sizeof(SensorSample);
+    if (!queueNotification(&sensorBatch, length)) {
+        ++droppedBatches;
+        Serial.printf("BLE queue full: dropped batches=%lu\n", (unsigned long)droppedBatches);
+    }
+    sensorBatch.count = 0;
+}
+
+// Append a new sample to the sensor batch
+void appendSensorSample(uint32_t timestamp, uint8_t source) {
+    SensorBatchPayload& sensorBatch = sensorBatches[source];
+    sensorBatch.source = source;
+    SensorSample& sample = sensorBatch.samples[sensorBatch.count];
+    sample.sequence = ++seq;
+    sample.timestamp = timestamp;
+
+    // TODO (hardware): replace this block with real IMU readings.
+    sample.accel[0] = 1.0f;
+    sample.accel[1] = 0.5f;
+    sample.accel[2] = 9.8f;
+    sample.gyro[0] = 0.0f;
+    sample.gyro[1] = 0.0f;
+    sample.gyro[2] = 0.0f;
+
+    sensorBatch.count++;
+    if (sensorBatch.count == SENSOR_BATCH_SIZE) sendSensorBatch(sensorBatch);
+}
+
+// Retry failed advertising starts; never claim success without checking it.
+uint32_t nextAdvertisingAttempt = 0;
+void ensureAdvertising() {
+    if (state != DISCONNECTED || NimBLEDevice::getServer()->getConnectedCount() != 0) return;
+    NimBLEAdvertising* advertising = NimBLEDevice::getAdvertising();
+    if (advertising->isAdvertising()) return;
+    const uint32_t now = millis();
+    if (static_cast<int32_t>(now - nextAdvertisingAttempt) < 0) return;
+    nextAdvertisingAttempt = now + 1000;
+    if (advertising->start()) Serial.printf("Advertising as %s\n", NODE_ID);
+    else Serial.println("Advertising start failed; retrying in 1s");
+}
 
 class ServerCallbacks : public NimBLEServerCallbacks {
     void onConnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo) {
         Serial.println("Laptop connected");
         state = CONNECTED;
-        connectedAt = millis();
-        pServer->updateConnParams(connInfo.getConnHandle(), 6, 12, 0, 100);
+        nextNotifyAt = millis();
+        pServer->updateConnParams(connInfo.getConnHandle(), 6, 12, 0, 400);
     }
 
     void onDisconnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo, int reason) {
-        Serial.println("Client disconnected - reset state and restart advertising");
+        Serial.printf("Client disconnected (reason=%d) - restarting advertising\n", reason);
         state = DISCONNECTED;
+        resetSensorBuffers = true;
         pendingHello = false;
         pendingConfigAck = false;
         pendingSyncResp = false;
@@ -85,8 +179,8 @@ class ServerCallbacks : public NimBLEServerCallbacks {
         syncRequestId = 0;
         syncNodeTimestamp = 0;
         streamingPaused = true;
-        sensorBatch.count = 0;
-        NimBLEDevice::startAdvertising();
+        capturePending = false;
+        // loop() restarts advertising and retries if the BLE host is not ready.
     }
 
     void onAuthenticationComplete(NimBLEConnInfo& connInfo) override {
@@ -126,12 +220,13 @@ class WriteCallback : public NimBLECharacteristicCallbacks {
             Serial.println("Received HELLO_REQ from laptop");
         } 
         else if (type == PKT_CONFIG) {
-            configuredSampleRate = doc["sample_rate_hz"] | 200;
+            continuousSampling = doc["continuous"] | true;
             pendingConfigAck = true;
         }
         else if (type == PKT_SYNC_START) {
             streamingPaused = true;
-            sensorBatch.count = 0;
+            capturePending = false;
+            resetSensorBuffers = true;
         }
         else if (type == PKT_SYNC_REQ) {
             syncRequestId = doc["request_id"] | 0;
@@ -139,33 +234,26 @@ class WriteCallback : public NimBLECharacteristicCallbacks {
             pendingSyncResp = true;
         }
         else if (type == PKT_SYNC_END) {
+            nextSampleAt = millis() + SAMPLE_INTERVAL_MS;
             streamingPaused = false;
             state = SYNCHRONISED;
         }
         else if (type == PKT_DUMMY) {
-            SensorBatchPayload dummyPkt;
-            dummyPkt.count = 1;
-            SensorSample& sample = dummyPkt.samples[0];
-            sample.sequence = doc["sequence"] | 0U;
-            sample.timestamp = millis();
-            sample.accel[0] = 1.0f;
-            sample.accel[1] = 0.5f;
-            sample.accel[2] = 9.8f;
-            sample.gyro[0] = 0.0f;
-            sample.gyro[1] = 0.0f;
-            sample.gyro[2] = 0.0f;
-            if (!notifyChar->notify(reinterpret_cast<uint8_t*>(&dummyPkt),
-                                    2 + sizeof(SensorSample))) {
-                Serial.println("Triggered sample notification failed");
-            }
+            if (state != SYNCHRONISED || streamingPaused || capturePending) return;
+            if (!doc["start_timestamp"].is<uint32_t>()) return;
+            const uint32_t start = doc["start_timestamp"].as<uint32_t>();
+            const int32_t delayMs = static_cast<int32_t>(start - millis());
+            if (delayMs <= 0 || delayMs > 2000) return;
+            captureStart = start;
+            nextCaptureAt = start;
+            capturePending = true;
         }
-
-        // only forearm node receives
+        // Only forearm node receives
         else if (type == PKT_HAPTIC_CMD) {
             const char* pattern = doc["pattern"] | "none";
             Serial.print("HAPTIC_CMD received, pattern = ");
             Serial.println(pattern);
-            // TODO (hardware); trigger actuatuor here 
+            // TODO (hardware): trigger actuator here
             pendingHapticAck = true;
         }
     }
@@ -200,28 +288,23 @@ void setup() {
 
     NimBLEAdvertising* advertising = NimBLEDevice::getAdvertising();
     advertising->addServiceUUID(SERVICE_UUID);
-    advertising->setName(NODE_ID);
-    advertising->start();
-    Serial.printf("Advertising as %s\n", NODE_ID);
+    if (!advertising->setName(NODE_ID)) Serial.println("Failed to put node name in advertisement");
+    ensureAdvertising();
 }
 
 void loop() {
-    // WATCHDOG: If connected but no HELLO_REQ received within 3 seconds, break ghost connection
-    if (state == CONNECTED && connectedAt > 0 && (millis() - connectedAt > 3000)) {
-        Serial.println("Ghost connection detected (no HELLO_REQ) - forcing disconnect");
-        connectedAt = 0;
-        NimBLEServer* server = NimBLEDevice::getServer();
-        if (server && server->getConnectedCount() > 0) {
-            server->disconnect(0);
-        }
-        state = DISCONNECTED;
-        NimBLEDevice::startAdvertising();
+    ensureAdvertising();
+    // BLE callbacks run on another task. Only loop() owns the sample/TX queues.
+    if (resetSensorBuffers) {
+        resetSensorBuffers = false;
+        txHead = txCount = 0;
+        for (auto& batch : sensorBatches) batch.count = 0;
     }
+    // The laptop owns setup deadlines and disconnects failed attempts.
 
     // 1. HELLO handshake
     if (pendingHello) {
         pendingHello = false;
-        connectedAt = 0;
         JsonDocument doc;
         doc["type"] = PKT_HELLO;
         doc["node_id"] = NODE_ID;
@@ -255,7 +338,7 @@ void loop() {
         Serial.println("Sent CONFIG_ACK - waiting for clock sync");
     }
 
-    // 3. Time Synchronisation Responses
+    // 3. Clock synchronisation responses
     if (pendingSyncResp) {
         pendingSyncResp = false;
         JsonDocument doc;
@@ -285,35 +368,40 @@ void loop() {
         Serial.println("Sent HAPTIC_RESP");
     }
 
-    // 5. Sample at 200Hz and batch five samples into each BLE notification.
-    static uint32_t lastSample = 0;
-    uint32_t interval = 1000 / configuredSampleRate;
-    if (state == SYNCHRONISED && !streamingPaused &&
-        (millis() - lastSample >= interval)) {
-        lastSample = millis();
-        seq++;
-
-        SensorSample& sample = sensorBatch.samples[sensorBatch.count];
-        sample.sequence = seq;
-        sample.timestamp = millis();
-        sample.accel[0] = 1.0f;
-        sample.accel[1] = 0.5f;
-        sample.accel[2] = 9.8f;
-        sample.gyro[0] = 0.0f;
-        sample.gyro[1] = 0.0f;
-        sample.gyro[2] = 0.0f;
-        sensorBatch.count++;
-
-        if (sensorBatch.count == SENSOR_BATCH_SIZE) {
-            const size_t payloadLength = 2 + sensorBatch.count * sizeof(SensorSample);
-
-            if (!notifyChar->notify(
-                    reinterpret_cast<uint8_t*>(&sensorBatch),
-                    payloadLength
-                )) {
-                Serial.println("Sensor batch notification failed");
-            }
-            sensorBatch.count = 0;
-        }
+    // 5. Append new sensor sample (distinct samples for streaming and keyboard capture)
+    if (state != SYNCHRONISED || streamingPaused) return;
+    const uint32_t now = millis();
+    if (capturePending &&
+        static_cast<int32_t>(now - (captureStart + CAPTURE_DURATION_MS)) >= 0) {
+        capturePending = false;
+        // Flush a short final batch if a delayed loop collected fewer samples.
+        if (sensorBatches[1].count) sendSensorBatch(sensorBatches[1]);
     }
-};
+
+    const bool captureActive = capturePending &&
+        static_cast<int32_t>(now - captureStart) >= 0;
+
+    // Both schedules run independently in combined mode (up to 400 samples/s
+    // per board). Missing a deadline skips catch-up samples instead of inventing
+    // readings. Signed subtraction handles the millis() counter wrapping.
+    // New sample if streaming sample due
+    if (continuousSampling && static_cast<int32_t>(now - nextSampleAt) >= 0) {
+        nextSampleAt += SAMPLE_INTERVAL_MS;
+
+        // Check if overdue
+        if (static_cast<int32_t>(now - nextSampleAt) >= 0)
+            nextSampleAt = now + SAMPLE_INTERVAL_MS;
+        appendSensorSample(now, 0); // 0 for normal source
+    }
+
+    // New sample if capture sample due
+    if (captureActive && static_cast<int32_t>(now - nextCaptureAt) >= 0) {
+        nextCaptureAt += SAMPLE_INTERVAL_MS;
+        
+        // Check if overdue
+        if (static_cast<int32_t>(now - nextCaptureAt) >= 0)
+            nextCaptureAt = now + SAMPLE_INTERVAL_MS;
+        appendSensorSample(now, 1); // 1 for dummy source
+    }
+    pumpNotifications(now);
+}

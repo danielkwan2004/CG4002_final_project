@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import hashlib
 import json
+import logging
 import struct
 import time
 from pathlib import Path
@@ -12,17 +13,20 @@ from bleak import BleakClient, BleakScanner
 
 import _bootstrap
 from utilities.constants import (
+    PacketType,
     NOTIFY_CHAR_UUID,
-    PKT_FILE_CHUNK,
-    PKT_FILE_CHUNK_REQ,
-    PKT_FILE_META,
-    PKT_FILE_REQ,
-    PKT_FILE_RESULT,
+    packet_type_name,
     SERVICE_UUID,
     WRITE_CHAR_UUID,
 )
 
+from utilities.logger_setup import get_logger, format_packet_for_log
+
+logger = logging.getLogger("ble_file_transfer")
+
 FILENAME = "/demo.txt"
+# Binary header fields: type:uint8, transfer_id:uint16, chunk_index:uint16,
+# data_length:uint8. Little-endian byte order matches the standalone sketch.
 CHUNK_HEADER = struct.Struct("<BHHB")   # B is 1 byte, H is 2 bytes
 CHUNK_SIZE = 160
 CHUNKS_PER_BATCH = 16
@@ -36,6 +40,7 @@ BATCH_IDLE_TIMEOUT_SECONDS = 0.075
 async def write_json(client: BleakClient, packet: dict) -> None:
     data = json.dumps(packet, separators=(",", ":")).encode()
     await client.write_gatt_char(WRITE_CHAR_UUID, data, response=True)
+    logger.debug("[BLE TX] %s", format_packet_for_log(packet))
 
 
 async def wait_for_packet(queue: asyncio.Queue, timeout: float) -> bytes:
@@ -52,7 +57,7 @@ async def request_metadata(
         await write_json(
             client,
             {
-                "type": PKT_FILE_REQ,
+                "type": PacketType.FILE_REQ,
                 "transfer_id": transfer_id,
                 "filename": filename,
             },
@@ -61,7 +66,7 @@ async def request_metadata(
             data = await wait_for_packet(queue, REPLY_TIMEOUT_SECONDS)
             packet = json.loads(data.decode())
             if (
-                packet.get("type") == PKT_FILE_META
+                packet.get("type") == PacketType.FILE_META
                 and packet.get("transfer_id") == transfer_id
             ):
                 return packet
@@ -80,7 +85,7 @@ def decode_chunk(packet: bytes, transfer_id: int):
     )
     expected_length = CHUNK_HEADER.size + data_length
     if (
-        packet_type != PKT_FILE_CHUNK
+        packet_type != PacketType.FILE_CHUNK
         or packet_transfer_id != transfer_id
         or len(packet) != expected_length
     ):
@@ -97,13 +102,15 @@ async def request_chunk_batch(
     count: int,
 ) -> tuple[list[bytes], int]:
     """Request one burst, then repair only chunks missing from that burst."""
+    # Indexing by chunk number tolerates duplicates and restores file order.
+    # Only missing indices are requested again; completed chunks are retained.
     received: dict[int, bytes] = {}
     end_index = start_index + count
 
     await write_json(
         client,
         {
-            "type": PKT_FILE_CHUNK_REQ,
+            "type": PacketType.FILE_CHUNK_REQ,
             "transfer_id": transfer_id,
             "chunk_index": start_index,
             "count": count,
@@ -166,7 +173,7 @@ async def request_single_chunk(
         await write_json(
             client,
             {
-                "type": PKT_FILE_CHUNK_REQ,
+                "type": PacketType.FILE_CHUNK_REQ,
                 "transfer_id": transfer_id,
                 "chunk_index": chunk_index,
                 "count": 1,
@@ -204,6 +211,7 @@ async def receive_file(
     output_dir: Path,
     hash_only: bool = False,
 ):
+    get_logger("ble_file_transfer")
     print(f"Scanning for {device_name!r}...")
     seen_names = set()
     service_candidates = {}
@@ -239,6 +247,12 @@ async def receive_file(
     queue: asyncio.Queue[bytes] = asyncio.Queue()
 
     def notification_handler(_sender, data: bytearray) -> None:
+        if len(data) >= CHUNK_HEADER.size and data[0] == PacketType.FILE_CHUNK:
+            type, transfer_id, chunk_index, size = CHUNK_HEADER.unpack_from(data)
+            logger.debug("[BLE RX] type=%s transfer_id=%d chunk_index=%d data_length=%d bytes=%d",
+                         packet_type_name(type), transfer_id, chunk_index, size, len(data))
+        else:
+            logger.debug("[BLE RX] %s", format_packet_for_log(data))
         queue.put_nowait(bytes(data))
 
     transfer_id = int(time.time()) & 0xFFFF
@@ -320,7 +334,7 @@ async def receive_file(
         await write_json(
             client,
             {
-                "type": PKT_FILE_RESULT,
+                "type": PacketType.FILE_RESULT,
                 "transfer_id": transfer_id,
                 "status": "OK" if verified else "ERROR",
             },
