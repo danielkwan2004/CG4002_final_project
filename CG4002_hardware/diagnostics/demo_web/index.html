@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PickleViz · Live hardware demo</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+<main>
+  <header>
+    <div class="brand"><span class="brandmark" aria-hidden="true">P</span><div><h1>PickleViz</h1><p>HARDWARE / MOTION TELEMETRY</p></div></div>
+    <div class="header-right"><span id="mode" class="badge">LOCAL DEMO</span><span id="node">Node 1</span><button id="fullscreen" type="button">Full screen</button></div>
+  </header>
+  <div id="replay" class="notice" hidden>RECORDED REPLAY — this is saved evidence, not a live hardware connection.</div>
+  <div id="server-warning" class="notice warning" role="alert" hidden>Dashboard cannot reach the Python receiver. Check the terminal. Readings below are frozen.</div>
+  <div id="quality-warning" class="notice warning" role="alert" hidden></div>
+  <section class="hero" data-state="waiting" id="hero" aria-labelledby="status">
+    <div class="hero-main">
+      <div class="eyebrow"><span class="status-dot" aria-hidden="true"></span><span id="connection">WAITING FOR DEVICE</span></div>
+      <h2 id="status" aria-live="polite">Ready when you are.</h2>
+      <p id="status-note">Start the receiver, then power on or reset the battery-powered node. Keep it flat and still through calibration.</p>
+      <div class="hero-footer"><span id="identity">Awaiting node</span><span id="heartbeat">No packets yet</span><span id="power">Power source not specified</span></div>
+    </div>
+    <div class="hero-aside"><span class="label">NEW BURSTS · THIS CAPTURE</span><strong id="burst-count">—</strong><span id="burst-note">Waiting for device diagnostics</span></div>
+  </section>
+
+  <section class="metrics" aria-label="Acquisition and delivery">
+    <div><span class="label">ACQUISITION RATE</span><p><strong id="rate">—</strong> <span>Hz</span></p><small id="interval">Completed register reads · waiting</small></div>
+    <div><span class="label">SAMPLES ACQUIRED · DEVICE BOOT</span><p><strong id="acquired">—</strong></p><small>Boot-wide rate and intervals include idle</small></div>
+    <div><span class="label">OFFERED → ACCEPTED → RECEIVED</span><p><strong id="delivery">—</strong></p><small id="delivery-note">This capture · waiting for finalized movement bursts</small></div>
+  </section>
+
+  <div id="queue-status" class="notice" aria-live="polite" hidden></div>
+
+  <div class="workspace">
+    <section class="signal" aria-labelledby="signal-title">
+      <div class="section-heading"><div><h2 id="signal-title">The movement signal</h2><p>Filtered rotation magnitude · degrees per second</p></div><span class="badge subtle" id="sample-tag">NO SAMPLE YET</span></div>
+      <div class="readings">
+        <div><span class="label">ROTATION</span><p><strong id="rotation">—</strong> <span>°/s</span></p></div>
+        <div><span class="label">ACCELERATION DEVIATION</span><p><strong id="acceleration">—</strong> <span>g</span></p></div>
+        <div class="reading-caption"><span id="sample-note">Movement samples appear here when the device gate opens.</span><span id="saturation" class="warning-text" hidden>Near-range-limit flag in the last received sample</span></div>
+      </div>
+      <svg id="chart" viewBox="0 0 740 220" role="img" aria-labelledby="chart-title chart-desc">
+        <title id="chart-title">Recent movement: filtered rotation magnitude</title><desc id="chart-desc">Rotation in degrees per second over receiver elapsed seconds. Only received movement samples are plotted; gaps are not zero readings.</desc>
+        <g id="chart-grid"></g><path id="chart-line" d=""></path><g id="chart-threshold"></g><g id="chart-labels"></g>
+      </svg>
+      <p class="chart-caption">Last 20 receiver seconds · display peak per 50 ms · gaps are not zero readings.<br>Dashed line: device start threshold. Full-resolution samples are retained in live captures.</p>
+      <div class="axes"><span id="gyro-axes">Gyro X / Y / Z: —</span><span id="accel-axes">Accel X / Y / Z: —</span></div>
+    </section>
+
+    <aside class="activity" aria-labelledby="activity-title">
+      <div class="section-heading"><h2 id="activity-title">What just happened</h2><span class="label">EVENT FEED</span></div>
+      <ol id="events"><li><time>00:00</time><span>Waiting for the receiver.</span></li></ol>
+    </aside>
+  </div>
+
+  <section class="demo-guide" aria-labelledby="guide-title">
+    <h2 id="guide-title">A simple demonstration</h2>
+    <div class="steps"><p><span>01</span><strong>Leave it still</strong>Wait for calibration, then “Settled”.</p><p><span>02</span><strong>Shake or rotate</strong>Watch the motion state and signal respond.</p><p><span>03</span><strong>Hold steady in the air</strong>The gate can settle without table contact.</p><p><span>04</span><strong>Lift, lower, pause</strong>Brisk changes may trigger; very gentle motion may not.</p></div>
+    <p class="boundary">This is threshold-based motion detection, not gesture classification or position tracking. “Settled” means the device gate is idle; it does not prove absolute stillness.</p>
+  </section>
+
+  <details><summary>Evidence &amp; technical details</summary>
+    <div class="technical"><p id="config">Configuration readback: waiting.</p><p id="thresholds">Thresholds: waiting for device configuration.</p><p id="health">Timing / transport diagnostics: waiting.</p><p id="transport">Detailed send-error diagnostics: waiting.</p><p id="queue-details">Transmit queue: waiting.</p><p id="coverage">Capture coverage: waiting.</p><p id="evidence">Evidence folder: waiting for receiver startup.</p></div>
+  </details>
+  <footer><span>ESP32 + ICM-42686-P → Wi-Fi UDP → laptop</span><span>Local display · no cloud services · stop with Ctrl+C in the terminal</span></footer>
+</main>
+</body>
+</html>

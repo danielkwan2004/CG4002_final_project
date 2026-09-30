@@ -7,12 +7,6 @@ const uint8_t REG_ACCEL_CONFIG0 = 0x50;
 const uint8_t REG_ACCEL_DATA_X1 = 0x1F;
 const uint8_t REG_WHO_AM_I = 0x75;
 
-const uint8_t LOW_NOISE_MODE = 0x03;
-const uint8_t ODR_200HZ = 0x07;
-const uint8_t DEFAULT_GYRO_FS = 0x00;   // +/-2000 dps
-const uint8_t DEFAULT_ACCEL_FS = 0x01;  // +/-16 g
-const float ACCEL_LSB_PER_G = 2048.0f;
-const float GYRO_LSB_PER_DPS = 16.4f;
 }
 
 ICM42686P::ICM42686P()
@@ -23,32 +17,50 @@ bool ICM42686P::begin(TwoWire& wire, uint8_t address) {
   bus = &wire;
   deviceAddress = address;
 
-  uint8_t whoAmI = readRegister(REG_WHO_AM_I);
-  if (whoAmI != EXPECTED_WHO_AM_I) {
+  readback = ImuRegisterReadback();
+  // Select bank zero explicitly, including after an ESP32-only reset.
+  if (!writeRegister(0x76, 0x00) ||
+      !readRegisters(REG_WHO_AM_I, &readback.whoAmI, 1) ||
+      readback.whoAmI != EXPECTED_WHO_AM_I) {
     Serial.println("[imu] WHO_AM_I check failed");
     return false;
   }
 
-  if (!writeRegister(REG_PWR_MGMT0,
-                     (LOW_NOISE_MODE << 2) | LOW_NOISE_MODE)) {
+  if (!writeRegister(REG_PWR_MGMT0, 0x00)) {
     Serial.println("[imu] PWR_MGMT0 write failed");
     return false;
   }
 
-  if (!writeRegister(REG_GYRO_CONFIG0,
-                     (DEFAULT_GYRO_FS << 5) | ODR_200HZ)) {
+  // Allow an already-running gyro to turn off before reconfiguration.
+  delay(50);
+  if (!writeRegister(REG_GYRO_CONFIG0, ImuConfig::GYRO_CONFIG0)) {
     Serial.println("[imu] GYRO_CONFIG0 write failed");
     return false;
   }
 
-  if (!writeRegister(REG_ACCEL_CONFIG0,
-                     (DEFAULT_ACCEL_FS << 5) | ODR_200HZ)) {
+  if (!writeRegister(REG_ACCEL_CONFIG0, ImuConfig::ACCEL_CONFIG0)) {
     Serial.println("[imu] ACCEL_CONFIG0 write failed");
     return false;
   }
 
+  if (!writeRegister(REG_PWR_MGMT0, ImuConfig::PWR_MGMT0)) {
+    return false;
+  }
+  // No register access immediately after enabling; also allow gyro startup.
   delay(50);
-  return true;
+  if (!readRegisters(REG_GYRO_CONFIG0, &readback.gyroConfig0, 1) ||
+      !readRegisters(REG_ACCEL_CONFIG0, &readback.accelConfig0, 1) ||
+      !readRegisters(REG_PWR_MGMT0, &readback.pwrMgmt0, 1)) {
+    Serial.println("[imu] configuration readback failed");
+    return false;
+  }
+  readback.verified = readback.gyroConfig0 == ImuConfig::GYRO_CONFIG0 &&
+      readback.accelConfig0 == ImuConfig::ACCEL_CONFIG0 &&
+      (readback.pwrMgmt0 & 0x0F) == ImuConfig::PWR_MGMT0;
+  Serial.printf("[imu] WHO_AM_I=0x%02X GYRO_CONFIG0=0x%02X ACCEL_CONFIG0=0x%02X PWR_MGMT0=0x%02X verified=%u\n",
+                readback.whoAmI, readback.gyroConfig0, readback.accelConfig0,
+                readback.pwrMgmt0, readback.verified);
+  return readback.verified;
 }
 
 uint8_t ICM42686P::readRegister(uint8_t address) {
@@ -80,7 +92,7 @@ bool ICM42686P::readRegisters(uint8_t startAddress, uint8_t* data, size_t length
 
   bus->beginTransmission(deviceAddress);
   bus->write(startAddress);
-  uint8_t writeError = bus->endTransmission(true);
+  uint8_t writeError = bus->endTransmission(false);  // I2C repeated START
   if (writeError != 0) {
     return false;
   }
@@ -114,12 +126,12 @@ bool ICM42686P::readRaw(SensorFrame& frame) {
   frame.gy = (int16_t)((data[8] << 8) | data[9]);
   frame.gz = (int16_t)((data[10] << 8) | data[11]);
 
-  frame.ax_g = frame.ax / ACCEL_LSB_PER_G;
-  frame.ay_g = frame.ay / ACCEL_LSB_PER_G;
-  frame.az_g = frame.az / ACCEL_LSB_PER_G;
-  frame.gx_dps = frame.gx / GYRO_LSB_PER_DPS;
-  frame.gy_dps = frame.gy / GYRO_LSB_PER_DPS;
-  frame.gz_dps = frame.gz / GYRO_LSB_PER_DPS;
+  frame.ax_g = frame.ax / ImuConfig::ACCEL_LSB_PER_G;
+  frame.ay_g = frame.ay / ImuConfig::ACCEL_LSB_PER_G;
+  frame.az_g = frame.az / ImuConfig::ACCEL_LSB_PER_G;
+  frame.gx_dps = frame.gx / ImuConfig::GYRO_LSB_PER_DPS;
+  frame.gy_dps = frame.gy / ImuConfig::GYRO_LSB_PER_DPS;
+  frame.gz_dps = frame.gz / ImuConfig::GYRO_LSB_PER_DPS;
   frame.status_flags = SENSOR_STATUS_PHYSICAL_UNITS_VALID;
 
   return true;

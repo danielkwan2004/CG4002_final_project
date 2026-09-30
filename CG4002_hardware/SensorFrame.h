@@ -1,7 +1,7 @@
 #ifndef SENSOR_FRAME_H
 #define SENSOR_FRAME_H
 
-#include <Arduino.h>
+#include <stdint.h>
 
 enum SensorStatusFlags : uint8_t {
   SENSOR_STATUS_NONE = 0x00,
@@ -13,6 +13,7 @@ enum SensorStatusFlags : uint8_t {
 
 struct SensorFrame {
   unsigned long timestamp_us;
+  unsigned long interval_us;  // Since previous completed read; first sample=0
   uint8_t node_id;
 
   uint32_t seq;

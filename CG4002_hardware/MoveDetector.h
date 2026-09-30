@@ -3,6 +3,14 @@
 
 #include <Arduino.h>
 
+namespace MoveConfig {
+constexpr float GYRO_START_THRESHOLD_DPS = 40.0f;
+constexpr float GYRO_STOP_THRESHOLD_DPS = 15.0f;
+constexpr float ACCEL_START_THRESHOLD_G = 0.3f;
+constexpr float ACCEL_STOP_THRESHOLD_G = 0.15f;
+constexpr unsigned long MOVE_MIN_QUIET_MS = 150;
+}
+
 enum MoveEvent : uint8_t {
   MOVE_EVENT_NONE = 0,
   MOVE_EVENT_STARTED,

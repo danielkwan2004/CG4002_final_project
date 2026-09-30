@@ -1,5 +1,34 @@
 # Plan: FireBeetle Sensor Node Hardware Build (Sensors + Haptics only)
 
+## P1/P2 implementation update — 2026-09-29
+
+The video follow-ups P1 and P2 now have capture tooling implemented; **new hardware
+validation is pending**. See `P1_P2_TEST_GUIDE.md` for the flash/run procedure and
+evidence to return. This update takes precedence over older defaults and diagnostic
+descriptions below; historical verification notes are preserved.
+
+- **P1:** correct the ICM-42686-P gyro selection to +/-2000 dps (`GYRO_CONFIG0=0x27`),
+  centralize the 16.4 counts/dps factor, and verify gyro/accel/power registers at
+  startup. +/-16 g and 200 Hz remain selected. WiFi config packets carry actual
+  readback and fresh calibration results for USB-disconnected testing.
+- **P2:** disable verbose acquisition-time Serial output, use 400 kHz I2C, count
+  expired scheduling slots, and measure completed-read intervals for every sample.
+  Protocol v3 adds boot/burst IDs, per-burst send-attempt indexes, per-sample device
+  timestamps/intervals, cumulative timing histograms, and repeated sender counts.
+  The receiver saves every received movement sample and diagnostic, handles
+  duplicates/reordering/reboots, and does not infer burst boundaries from silence.
+- WiFi is currently **enabled**. Movement-gated data normally carries status
+  `0x0E` (14); its final boundary frame also retains the movement bit.
+- Startup range agreement does not prove absolute gyro accuracy, regular register
+  reads do not prove unique sensor updates, and local UDP acceptance does not prove
+  delivery. New measurements must support the final presentation wording.
+- User reports P3 testing is underway on LiPo with USB disconnected. This is test
+  context, not a completed battery-capacity/protection/runtime validation.
+- The video presentation, script, historical capture and plots are unchanged until
+  the new results are reviewed. Neither P1 nor P2 is marked hardware-verified yet.
+- Software verification: FireBeetle 2 ESP32-E build passed with ESP32 core 3.3.11;
+  21 receiver regression tests passed, including localhost UDP capture/export.
+
 Scope: Section 3 (Hardware Sensors) of `CG4002_Design_Report.md` plus a temporary WiFi
 telemetry demonstration for electronics validation. Excludes final BLE/MQTT (Section 4,
 Comms teammate), FPGA/AI (Section 5), and AR visualizer (Section 6).

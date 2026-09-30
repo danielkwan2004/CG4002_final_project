@@ -1,13 +1,7 @@
 #include "MoveDetector.h"
 
 // Placeholder thresholds only -- not yet calibrated against real actions.
-namespace {
-const float GYRO_START_THRESHOLD_DPS = 40.0f;
-const float GYRO_STOP_THRESHOLD_DPS = 15.0f;
-const float ACCEL_START_THRESHOLD_G = 0.3f;
-const float ACCEL_STOP_THRESHOLD_G = 0.15f;
-const unsigned long MOVE_MIN_QUIET_MS = 150;
-}  // namespace
+using namespace MoveConfig;
 
 MoveDetector::MoveDetector()
     : active(false), belowStopThreshold(false), belowStopSinceMs(0) {}

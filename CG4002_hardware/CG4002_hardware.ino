@@ -5,8 +5,11 @@
 #include "WiFiTelemetry.h"
 #include "AxisMapping.h"
 #include "MoveDetector.h"
+#include "CaptureDiagnostics.h"
+#include "TelemetryScheduler.h"
+#include <esp_system.h>
 
-const unsigned long SAMPLE_PERIOD_US = 5000;  // 200 Hz
+const unsigned long SAMPLE_PERIOD_US = ImuConfig::SAMPLE_PERIOD_US;
 const int BUFFER_SIZE = 256;
 const int CALIBRATION_SAMPLES = 400;          // 2 seconds at 200 Hz
 const int SAMPLE_DELAY_MS = 5;
@@ -19,12 +22,19 @@ const int HAPTIC_PIN = 25;
 const int HAPTIC_DUTY_ON = 255;  // module is only felt at duty >=200 on the bench
 const bool ENABLE_WIFI_TELEMETRY = true;
 const bool WIFI_ONLY_DEMO = false;
+// P1/P2 capture: keep acquisition free of blocking per-sample UART output.
+// All movement samples and periodic diagnostics are saved by the UDP receiver.
+const bool ENABLE_VERBOSE_SAMPLE_LOG = false;
 const char* WIFI_DEMO_SSID = "Reno13";
 const char* WIFI_DEMO_PASSWORD = "12345678";
-const char* WIFI_LAPTOP_IP = "10.60.118.93";
+const char* WIFI_LAPTOP_IP = "10.20.167.93";
 const uint16_t WIFI_DEMO_PORT = 4210;
 
 unsigned long nextSampleTime;
+uint32_t bootId = 0;
+CaptureDiagnostics captureDiagnostics;
+TelemetryScheduler telemetryScheduler;
+unsigned long lastConfigReportMs = 0;
 
 
 // =====================================================
@@ -72,8 +82,7 @@ unsigned long totalConsumerProcessingUs = 0;
 unsigned long processedSampleCount = 0;
 unsigned long saturatedSampleCount = 0;
 
-// Isolates wifiTelemetry.sendFrame() cost to confirm/rule it out as the
-// pacing bottleneck during a move burst -- separate from processingUs above.
+// Maximum telemetry operation cost, including diagnostics, separate from sensing.
 unsigned long maxWifiSendUs = 0;
 unsigned long totalWifiSendUs = 0;
 unsigned long wifiSendCount = 0;
@@ -106,7 +115,7 @@ const char* hapticPatternName(HapticPattern pattern) {
 
 // Non-blocking PWM waveform player: each pattern is a sequence of
 // (duty, duration) steps, advanced from loop() via updateHapticPattern()
-// so it never delay()s and can't disturb the 200 Hz sample timing.
+// without delay(). Other loop work can still extend the step durations.
 struct HapticStep {
   uint8_t duty;
   uint16_t durationMs;
@@ -288,7 +297,7 @@ void runWifiOnlyDemo() {
   frame.ax_g = 0.0;
   frame.ay_g = 0.0;
   frame.az_g = 1.0;
-  frame.gx_dps = frame.gx / 16.4f;
+  frame.gx_dps = frame.gx / ImuConfig::GYRO_LSB_PER_DPS;
   frame.gy_dps = 0.0;
   frame.gz_dps = 0.0;
   frame.ax_filtered_g = frame.ax_g;
@@ -299,7 +308,8 @@ void runWifiOnlyDemo() {
   frame.gz_filtered_dps = frame.gz_dps;
   frame.status_flags = SENSOR_STATUS_PHYSICAL_UNITS_VALID;
 
-  if (!wifiTelemetry.sendFrame(frame)) {
+  frame.interval_us = SAMPLE_PERIOD_US;
+  if (!wifiTelemetry.sendFrame(frame, bootId, 1, frame.seq)) {
     Serial.println("[wifi] demo send failed");
   }
 }
@@ -359,6 +369,8 @@ void setup() {
   delay(1000);
 
   Serial.println("FireBeetle started");
+  bootId = esp_random();
+  captureDiagnostics.begin(NODE_ID, bootId);
 
   pinMode(HAPTIC_PIN, OUTPUT);
   analogWrite(HAPTIC_PIN, 0);
@@ -379,17 +391,6 @@ void setup() {
     Serial.println(WIFI_LAPTOP_IP);
     return;
   }
-
-  Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);
-
-  if (!imu.begin(Wire, ICM42686P::DEFAULT_ADDRESS)) {
-    Serial.println("[imu] begin failed");
-    setNodeState(NODE_FAULT);
-    return;
-  }
-
-  Serial.println("[imu] ready");
-  Serial.println("[imu] axis mapping=identity (provisional)");
 
   if (ENABLE_WIFI_TELEMETRY &&
       !wifiTelemetry.begin(WIFI_DEMO_SSID, WIFI_DEMO_PASSWORD,
@@ -414,7 +415,22 @@ void setup() {
 
   Serial.print("[state] ");
   Serial.println(nodeStateName(nodeState));
+  Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);
+  // One 12-byte read comfortably fits the 5 ms budget at 400 kHz.
+  // Measured acquisition intervals, not this setting, establish the achieved rate.
+  Wire.setClock(400000);
+  if (!imu.begin(Wire, ICM42686P::DEFAULT_ADDRESS)) {
+    Serial.println("[imu] begin/readback failed");
+    setNodeState(NODE_FAULT);
+    return;
+  }
+  Serial.println("[imu] ready; axis mapping=identity (provisional)");
   setNodeState(NODE_CALIBRATING);
+  if (ENABLE_WIFI_TELEMETRY) {
+    captureDiagnostics.sendConfiguration(wifiTelemetry, imu.configuration(),
+        gyroCalibration, accelCalibration, nodeStateName(nodeState),
+        FILTER_ALPHA, CALIBRATION_SAMPLES);
+  }
 
   gyroCalibration = calibrateGyroscope(
       readSensor,
@@ -434,7 +450,16 @@ void setup() {
   }
 
   setNodeState(NODE_STREAMING);
+  Serial.printf("[calibration] gyro bias counts=(%.6f,%.6f,%.6f)\n",
+      gyroCalibration.biasX, gyroCalibration.biasY, gyroCalibration.biasZ);
+  if (ENABLE_WIFI_TELEMETRY) {
+    captureDiagnostics.sendConfiguration(wifiTelemetry, imu.configuration(),
+        gyroCalibration, accelCalibration, nodeStateName(nodeState),
+        FILTER_ALPHA, CALIBRATION_SAMPLES);
+    lastConfigReportMs = millis();
+  }
 
+  if (ENABLE_VERBOSE_SAMPLE_LOG) {
   Serial.println(
   "Seq | "
   "AX [raw counts, calibrated g, filtered g] | "
@@ -445,9 +470,48 @@ void setup() {
   "GZ [raw counts, corrected counts, filtered counts, filtered dps] | "
   "status_flags"
   );
+  }
 
   nextSampleTime = micros();
-  nextStatsPrintTime = micros();
+  nextStatsPrintTime = micros() + STATS_PRINT_INTERVAL_US;
+}
+
+// Called only inside an admitted telemetry slot, including while in FAULT.
+// The periodic trigger queues work; it never sends a whole heartbeat at once.
+bool publishCaptureDiagnostics() {
+  unsigned long reportTime = micros();
+  if ((long)(reportTime - nextStatsPrintTime) >= 0) {
+    bool includeConfiguration = millis() - lastConfigReportMs >= 5000 || nodeState == NODE_FAULT;
+    if (captureDiagnostics.requestHeartbeat(includeConfiguration)) {
+      nextStatsPrintTime = reportTime + STATS_PRINT_INTERVAL_US;
+      if (includeConfiguration) lastConfigReportMs = millis();
+      maxProducerJitterUs = 0;
+      maxConsumerQueueLatencyUs = 0;
+      totalConsumerProcessingUs = 0;
+      processedSampleCount = 0;
+      saturatedSampleCount = 0;
+      sequenceGapCount = 0;
+      totalWifiSendUs = 0;
+      wifiSendCount = 0;
+      // Processing/telemetry maxima are now retained for the whole boot.
+    }
+  }
+  return captureDiagnostics.serviceHeartbeat(wifiTelemetry, reportTime,
+      nodeStateName(nodeState), droppedSampleCount, bufferHighWaterMark,
+      maxConsumerProcessingUs, maxWifiSendUs, imu.configuration(),
+      gyroCalibration, accelCalibration, FILTER_ALPHA, CALIBRATION_SAMPLES);
+}
+
+void serviceTelemetry() {
+  if (!ENABLE_WIFI_TELEMETRY || !telemetryScheduler.takeSlot(micros(),
+      nextSampleTime, nextSeq, nodeState != NODE_FAULT)) return;
+  unsigned long startUs = micros();
+  bool diagnostic = captureDiagnostics.publishFinalBurst(wifiTelemetry);
+  if (!diagnostic) diagnostic = publishCaptureDiagnostics();
+  if (!diagnostic) wifiTelemetry.service(captureDiagnostics);
+  unsigned long durationUs = micros() - startUs;
+  if (durationUs > maxWifiSendUs) maxWifiSendUs = durationUs;
+  captureDiagnostics.recordTelemetryCost(durationUs, diagnostic);
 }
 
 
@@ -466,6 +530,7 @@ void loop() {
   updateHapticPattern();
 
   if (nodeState == NODE_FAULT) {
+    serviceTelemetry();
     return;
   }
 
@@ -483,7 +548,11 @@ void loop() {
       return;
     }
 
-    nextSampleTime += SAMPLE_PERIOD_US;
+    unsigned long latenessUs = currentTime - nextSampleTime;
+    uint32_t skipped = latenessUs / SAMPLE_PERIOD_US;
+    // Skip expired software slots. Catch-up reads cannot recover overwritten
+    // IMU registers and could instead count the same sensor update twice.
+    nextSampleTime += (skipped + 1) * SAMPLE_PERIOD_US;
 
     // Producer jitter: deviation from the expected 5 ms cadence.
     if (lastProduceTime != 0) {
@@ -494,7 +563,9 @@ void loop() {
     }
     lastProduceTime = currentTime;
 
+    unsigned long readStart = micros();
     SensorFrame frame = readSensor();
+    unsigned long readUs = micros() - readStart;
 
     if (imuReadFault) {
       setNodeState(NODE_FAULT);
@@ -502,6 +573,8 @@ void loop() {
     }
     frame.node_id = NODE_ID;
     frame.seq = nextSeq++;
+    frame.interval_us = captureDiagnostics.recordAcquisition(
+        frame.timestamp_us, readUs, latenessUs, skipped);
     frame.ax_g -= accelCalibration.offsetX_g;
     frame.ay_g -= accelCalibration.offsetY_g;
     frame.az_g -= accelCalibration.offsetZ_g;
@@ -585,9 +658,9 @@ void loop() {
     frame.ax_filtered_g = filteredAX;
     frame.ay_filtered_g = filteredAY;
     frame.az_filtered_g = filteredAZ;
-    frame.gx_filtered_dps = filteredGX / 16.4f;
-    frame.gy_filtered_dps = filteredGY / 16.4f;
-    frame.gz_filtered_dps = filteredGZ / 16.4f;
+    frame.gx_filtered_dps = filteredGX / ImuConfig::GYRO_LSB_PER_DPS;
+    frame.gy_filtered_dps = filteredGY / ImuConfig::GYRO_LSB_PER_DPS;
+    frame.gz_filtered_dps = filteredGZ / ImuConfig::GYRO_LSB_PER_DPS;
     frame.status_flags |= SENSOR_STATUS_CALIBRATED;
 
     bool sampleSaturated =
@@ -621,11 +694,16 @@ void loop() {
     bool isMoveActiveNow = moveDetector.isActive();
 
     if (moveEvent == MOVE_EVENT_STARTED) {
-      Serial.print("[move] start seq=");
-      Serial.println(frame.seq);
+      captureDiagnostics.startBurst(frame);
+      if (ENABLE_VERBOSE_SAMPLE_LOG) {
+        Serial.print("[move] start seq=");
+        Serial.println(frame.seq);
+      }
     } else if (moveEvent == MOVE_EVENT_ENDED) {
-      Serial.print("[move] end seq=");
-      Serial.println(frame.seq);
+      if (ENABLE_VERBOSE_SAMPLE_LOG) {
+        Serial.print("[move] end seq=");
+        Serial.println(frame.seq);
+      }
     }
 
     // Send the boundary frame on either side of a transition too, so the
@@ -633,6 +711,8 @@ void loop() {
     bool shouldSendFrame = wasMoveActive || isMoveActiveNow;
     if (shouldSendFrame) {
       frame.status_flags |= SENSOR_STATUS_MOVE_ACTIVE;
+    } else {
+      captureDiagnostics.recordIdle(frame, gyroCalibration);
     }
 
     // Excludes the Serial prints below.
@@ -650,7 +730,7 @@ void loop() {
     // loop well below the nominal sample rate.
     // -----------------------------
 
-    if (shouldSendFrame) {
+    if (ENABLE_VERBOSE_SAMPLE_LOG && shouldSendFrame) {
 
     Serial.print(frame.seq);
     Serial.print(" | ");
@@ -716,76 +796,26 @@ void loop() {
 
     if (ENABLE_WIFI_TELEMETRY && shouldSendFrame) {
       unsigned long wifiSendStart = micros();
-      bool sendOk = wifiTelemetry.sendFrame(frame);
+      bool sendOk = wifiTelemetry.enqueueFrame(frame, bootId,
+          captureDiagnostics.burstId(), captureDiagnostics.burstIndex());
+      captureDiagnostics.recordQueued(frame, sendOk);
       unsigned long wifiSendUs = micros() - wifiSendStart;
       if (wifiSendUs > maxWifiSendUs) {
         maxWifiSendUs = wifiSendUs;
       }
       totalWifiSendUs += wifiSendUs;
       wifiSendCount++;
-      if (!sendOk) {
-        Serial.println("[wifi] send failed");
+      if (!sendOk && ENABLE_VERBOSE_SAMPLE_LOG) {
+        Serial.println("[wifi] transmit queue full; sample discarded");
+      }
+      if (moveEvent == MOVE_EVENT_ENDED) {
+        captureDiagnostics.endBurst(wifiTelemetry);
       }
     }
   }
 
 
-  // ---------------------------------------------------
-  // Occupancy diagnostics: printed periodically, not per-sample.
-  // Placed after the consumer so this slower, infrequent print doesn't
-  // inflate this iteration's measured queue latency/processing time.
-  // ---------------------------------------------------
-
-  if ((long)(currentTime - nextStatsPrintTime) >= 0) {
-
-    nextStatsPrintTime += STATS_PRINT_INTERVAL_US;
-
-    Serial.print("[stats] state=");
-    Serial.print(nodeStateName(nodeState));
-    Serial.print(" dropped=");
-    Serial.print(droppedSampleCount);
-    Serial.print(" highWaterMark=");
-    Serial.print(bufferHighWaterMark);
-    Serial.print("/");
-    Serial.print(BUFFER_SIZE);
-    Serial.print(" maxProducerJitterUs=");
-    Serial.print(maxProducerJitterUs);
-    Serial.print(" maxQueueLatencyUs=");
-    Serial.print(maxConsumerQueueLatencyUs);
-    Serial.print(" maxProcessingUs=");
-    Serial.print(maxConsumerProcessingUs);
-    Serial.print(" avgProcessingUs=");
-    unsigned long averageProcessingUs = 0;
-    if (processedSampleCount > 0) {
-      averageProcessingUs = totalConsumerProcessingUs / processedSampleCount;
-    }
-    Serial.print(averageProcessingUs);
-    Serial.print(" cpuMarginUs=");
-    long cpuMarginUs = (long)SAMPLE_PERIOD_US - (long)maxConsumerProcessingUs;
-    Serial.print(cpuMarginUs);
-    Serial.print(" saturatedSamples=");
-    Serial.print(saturatedSampleCount);
-    Serial.print(" sequenceGaps=");
-    Serial.print(sequenceGapCount);
-    Serial.print(" maxWifiSendUs=");
-    Serial.print(maxWifiSendUs);
-    Serial.print(" avgWifiSendUs=");
-    unsigned long averageWifiSendUs = 0;
-    if (wifiSendCount > 0) {
-      averageWifiSendUs = totalWifiSendUs / wifiSendCount;
-    }
-    Serial.println(averageWifiSendUs);
-
-    // Report worst-case-per-second, not worst-case-since-boot.
-    maxProducerJitterUs = 0;
-    maxConsumerQueueLatencyUs = 0;
-    maxConsumerProcessingUs = 0;
-    totalConsumerProcessingUs = 0;
-    processedSampleCount = 0;
-    saturatedSampleCount = 0;
-    sequenceGapCount = 0;
-    maxWifiSendUs = 0;
-    totalWifiSendUs = 0;
-    wifiSendCount = 0;
-  }
+  // At most one network operation per acquisition, with >3.5 ms remaining.
+  // Heartbeat parts are >=10 ms apart, leaving slots for movement delivery.
+  serviceTelemetry();
 }

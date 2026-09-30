@@ -4,6 +4,15 @@
 #include <Arduino.h>
 #include <Wire.h>
 #include "SensorFrame.h"
+#include "ImuConfig.h"
+
+struct ImuRegisterReadback {
+  uint8_t whoAmI = 0;
+  uint8_t gyroConfig0 = 0;
+  uint8_t accelConfig0 = 0;
+  uint8_t pwrMgmt0 = 0;
+  bool verified = false;
+};
 
 class ICM42686P {
 
@@ -15,6 +24,7 @@ public:
 
   bool begin(TwoWire& wire, uint8_t address = DEFAULT_ADDRESS);
   bool readRaw(SensorFrame& frame);
+  const ImuRegisterReadback& configuration() const { return readback; }
 
   uint8_t readRegister(uint8_t address);
   bool writeRegister(uint8_t address, uint8_t value);
@@ -22,6 +32,7 @@ public:
 private:
   TwoWire* bus;
   uint8_t deviceAddress;
+  ImuRegisterReadback readback;
 
   bool readRegisters(uint8_t startAddress, uint8_t* data, size_t length);
 };
