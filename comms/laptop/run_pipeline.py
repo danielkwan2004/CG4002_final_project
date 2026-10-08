@@ -32,7 +32,7 @@ PW_LAPTOP_CLI = os.getenv("PW_LAPTOP_CLI")
 # Acquisition still lasts one second; this is only the scheduling lead.
 CAPTURE_LEAD_MS = 200
 
-# Only paired samples are published. The session and sequence fields let receivers
+# Paired and single-sensor samples are published. The session and sequence fields let receivers
 # distinguish laptop restarts and trace an AI result back to its final input pair.
 async def publisher_task(output_queue: asyncio.Queue, mqtt_client: MQTTClientWrapper, logger, metrics):
     while True:
@@ -92,7 +92,6 @@ def raw_keyboard():
 
 async def keyboard_task(nodes, logger):
     """Request a one-second burst through the ordinary decoder and publisher."""
-    await asyncio.gather(*(node.ready.wait() for node in nodes))
     logger.info("Keyboard ready: printable key = one-second 200 Hz burst/node; Ctrl-C stops")
     loop = asyncio.get_running_loop()
     keys = asyncio.Queue()
@@ -117,8 +116,10 @@ async def keyboard_task(nodes, logger):
                 if loop.time() < busy_until:
                     logger.info("Key ignored: one-second capture already active")
                     continue
-                if not all(node.ready.is_set() and node.client.is_connected for node in nodes):
-                    logger.warning("Key skipped: both FireBeetles must be ready")
+                available = [node for node in nodes if node.ready.is_set()
+                             and node.client is not None and node.client.is_connected]
+                if not available:
+                    logger.warning("Key skipped: no FireBeetle is ready")
                     continue
                 # Schedule both nodes against the same corrected laptop clock.
                 # No key, session, sequence override or dummy payload is sent.
@@ -126,11 +127,11 @@ async def keyboard_task(nodes, logger):
                 busy_until = start_ms / 1000 + 1.1
                 logger.info("Capture key handled: sampling starts in %dms and lasts 1000ms",
                             CAPTURE_LEAD_MS)
-                sent = await asyncio.gather(*(node.send_capture(start_ms) for node in nodes))
+                sent = await asyncio.gather(*(node.send_capture(start_ms) for node in available))
                 if all(sent):
                     logger.debug("One-second burst requested")
                 else:
-                    logger.warning("Capture write failed; only received sensor pairs enter the AI window")
+                    logger.warning("Capture write failed; received samples still enter the AI window")
         finally:
             loop.remove_reader(fd)
 

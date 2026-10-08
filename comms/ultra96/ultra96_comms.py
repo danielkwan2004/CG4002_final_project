@@ -86,13 +86,20 @@ def publish_ai_result(stroke, confidence, pairs):
             "sensor_seq": sensor_seq,
             "stroke": stroke,
             "confidence": confidence,
-            "sample_pairs": len(pairs),
+            "sensor_sample_counts": {
+                name: sum(packet.get(name) is not None for packet in pairs)
+                for name in ("forearm", "paddle")
+            },
+            "complete_pairs": sum(
+                packet.get("forearm") is not None and packet.get("paddle") is not None
+                for packet in pairs
+            ),
         }
 
         if not client.publish(TOPIC_RESULTS, result, qos=1):
             logger.info("Dropped AI result while MQTT is unavailable")
             return
-        logger.info(f"Published AI result #{result_seq}: source = {source}, sensor_seq = {sensor_seq}, sample_pairs = {len(pairs)}, stroke = {stroke}")
+        logger.info(f"Published AI result #{result_seq}: source = {source}, sensor_seq = {sensor_seq}, sample_packets = {len(pairs)}, stroke = {stroke}")
 
         # Dummy results never trigger haptics or advance the stream-result counter.
         if source == "dummy":

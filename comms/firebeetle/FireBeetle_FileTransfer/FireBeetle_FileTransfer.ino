@@ -127,6 +127,7 @@ bool createDemoFile() {
     size_t remaining = DEMO_FILE_SIZE;
 
     while (remaining > 0) {
+        // How many characters to write each time
         size_t writeSize = remaining < patternSize ? remaining : patternSize;
         if (file.write(pattern, writeSize) != writeSize) {
             file.close();
