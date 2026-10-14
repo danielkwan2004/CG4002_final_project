@@ -4,6 +4,7 @@
 #include "Calibration.h"
 #include "ICM42686P.h"
 #include "WiFiTelemetry.h"
+#include "ImuHealth.h"
 
 struct BurstCounters {
   uint32_t id = 0;
@@ -17,6 +18,7 @@ struct BurstCounters {
   uint32_t pending = 0;
   bool gateClosed = false;
   bool dirty = true;
+  bool interrupted = false;
 };
 
 // Diagnostics are cumulative per boot. Losing a heartbeat does not lose the
@@ -33,7 +35,10 @@ public:
   uint32_t burstIndex() const { return current.attempted; }
   void recordQueued(const SensorFrame& frame, bool admitted);
   void recordDelivery(uint32_t burst, uint32_t count, bool accepted);
-  void endBurst(WiFiTelemetry& wifi);
+  void endBurst(WiFiTelemetry& wifi, bool interrupted = false);
+  void recordImuHealth(const ImuHealth& health) { imuHealth = health; }
+  void recordMissedAcquisition(unsigned long readUs, unsigned long latenessUs,
+                               uint32_t skipped);
   bool publishFinalBurst(WiFiTelemetry& wifi);
   void sendConfiguration(WiFiTelemetry& wifi, const ImuRegisterReadback& regs,
       const GyroCalibration& gyro, const AccelCalibration& accel,
@@ -59,6 +64,7 @@ private:
   uint8_t nodeId = 0;
   uint32_t bootId = 0;
   uint32_t produced = 0;
+  ImuHealth imuHealth;
   uint32_t intervals = 0;
   unsigned long previousUs = 0;
   uint64_t intervalSumUs = 0;

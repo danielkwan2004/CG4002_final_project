@@ -34,6 +34,8 @@ public:
   MoveEvent update(float gyroMagDps, float accelDeviationG, unsigned long nowMs);
 
   bool isActive() const;
+  // Missing data cannot establish a continuous quiet interval.
+  void interruptQuietWindow() { belowStopThreshold = false; }
 
 private:
   bool active;

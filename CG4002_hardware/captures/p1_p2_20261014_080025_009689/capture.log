@@ -1,0 +1,78 @@
+[    0.00s] Listening on 0.0.0.0:4210; firmware v3/v4 supported (v4 batches + retry queue)
+[    0.00s] Capture directory: C:\Users\USER\Documents\NUS\Y3S1_mods\CG4002\CG4002_final_project\captures\p1_p2_20261014_080025_009689
+[    0.00s] Operator-reported power: lipo-usb-disconnected. Start/reset the node now and keep it flat and still.
+[    0.84s] [burst] Node 1 boot=d78264f8 burst=4 attempted=480 accepted=480 local_fail=0 received_unique=0 accepted_not_received=480 duplicates=0 reordered=0 (boot evidence; may predate this capture)
+[    1.84s] [burst] Node 1 boot=d78264f8 burst=5 attempted=151 accepted=151 local_fail=0 received_unique=0 accepted_not_received=151 duplicates=0 reordered=0 (boot evidence; may predate this capture)
+[    2.84s] [burst] Node 1 boot=d78264f8 burst=1 attempted=104 accepted=104 local_fail=0 received_unique=0 accepted_not_received=104 duplicates=0 reordered=0 (boot evidence; may predate this capture)
+[    3.83s] [burst] Node 1 boot=d78264f8 burst=2 attempted=584 accepted=584 local_fail=0 received_unique=0 accepted_not_received=584 duplicates=0 reordered=0 (boot evidence; may predate this capture)
+[    4.84s] [burst] Node 1 boot=d78264f8 burst=3 attempted=125 accepted=125 local_fail=0 received_unique=0 accepted_not_received=125 duplicates=0 reordered=0 (boot evidence; may predate this capture)
+[    4.89s] [config] Node 1 boot=d78264f8 state=STREAMING WHO=0x44 GYRO_CONFIG0=0x27 ACCEL_CONFIG0=0x27 range_readback_verified=True diag_scheduler=staggered_v1
+[    4.89s] [calibration] gyro_bias_counts=[0.33, -6.4875, 9.6425] accel_offset_g=[-0.03527, 0.032504, 0.006858]
+[    5.10s] [timing] Node 1 boot=d78264f8 state=STREAMING acquired=21034 rate=200.00 Hz dt[min/mean/max]=4525/5000.0/5141 us within4.5-5.5ms=100.00% skipped_slots=0 buffer_drops=0 max_diagnostic_us=1083 imu_read_failures=0 imu_recoveries=0 saturated=0
+[    5.10s] [transport] Node 1 report=105 wifi_status=3 rssi=-44 dBm (0=unavailable) disconnects=1 reason=2 heap=192228 failed[data/control]=0/0 errors[ENOMEM/busy/network/other]=[0, 0, 0, 0] last=none errno=0 at_uptime_ms=0 last_wifi=0 cached_failure_rssi=0 age_ms=0
+[    5.10s] [txqueue] offered=1444 accepted=1444 pending=0 FINAL_DROPS=0 recovered_samples=0 retry_calls=0 high_water=6/128 oldest_ms=0 max_age_ms=25 drop_causes[overflow/expiry/permanent/cancel]=0/0/0/0
+[    5.10s] [this-capture] offered=0 accepted=0 received=0 final_local_drops=0 accepted_not_received=0 excluded_historical_bursts=['4', '5', '1', '2', '3'] partial_bursts=[] pending_bursts=[]; Final consistent bursts starting at/after the first observed acquisition boundary; historical and partial bursts excluded.
+[   10.13s] [timing] Node 1 boot=d78264f8 state=STREAMING acquired=22035 rate=200.00 Hz dt[min/mean/max]=4525/5000.0/5141 us within4.5-5.5ms=100.00% skipped_slots=0 buffer_drops=0 max_diagnostic_us=1083 imu_read_failures=0 imu_recoveries=0 saturated=0
+[   10.13s] [transport] Node 1 report=110 wifi_status=3 rssi=-58 dBm (0=unavailable) disconnects=1 reason=2 heap=192228 failed[data/control]=0/0 errors[ENOMEM/busy/network/other]=[0, 0, 0, 0] last=none errno=0 at_uptime_ms=0 last_wifi=0 cached_failure_rssi=0 age_ms=0
+[   10.13s] [txqueue] offered=1444 accepted=1444 pending=0 FINAL_DROPS=0 recovered_samples=0 retry_calls=0 high_water=6/128 oldest_ms=0 max_age_ms=25 drop_causes[overflow/expiry/permanent/cancel]=0/0/0/0
+[   10.13s] [this-capture] offered=0 accepted=0 received=0 final_local_drops=0 accepted_not_received=0 excluded_historical_bursts=['4', '5', '1', '2', '3'] partial_bursts=[] pending_bursts=[]; Final consistent bursts starting at/after the first observed acquisition boundary; historical and partial bursts excluded.
+[   11.19s] [sample] Node 1 burst=6 seq=22301 t_us=127239737 dt_us=5004 accel=(-0.009,+0.161,+1.043) g gyro=(+38.27,+18.01,+8.17) dps
+[   11.69s] [burst] Node 1 boot=d78264f8 burst=6 attempted=104 accepted=104 local_fail=0 received_unique=104 accepted_not_received=0 duplicates=0 reordered=0 (boot evidence; may predate this capture)
+[   12.56s] [sample] Node 1 burst=7 seq=22574 t_us=128604733 dt_us=5004 accel=(-0.369,+0.350,+0.689) g gyro=(+22.71,+4.70,-47.10) dps
+[   13.08s] [sample] Node 1 burst=7 seq=22679 t_us=129129795 dt_us=5058 accel=(-0.536,+0.446,+0.882) g gyro=(+33.20,+43.27,-63.26) dps
+[   13.59s] [sample] Node 1 burst=7 seq=22779 t_us=129629795 dt_us=5058 accel=(-0.534,+0.512,+0.804) g gyro=(-39.59,-62.65,+54.34) dps
+[   14.15s] [sample] Node 1 burst=7 seq=22884 t_us=130154791 dt_us=5054 accel=(-0.512,+0.498,+0.887) g gyro=(-43.38,-29.87,+72.57) dps
+[   14.66s] [sample] Node 1 burst=7 seq=22994 t_us=130704795 dt_us=5058 accel=(-0.381,+0.527,+0.981) g gyro=(-64.93,-30.69,+124.83) dps
+[   15.14s] [timing] Node 1 boot=d78264f8 state=STREAMING acquired=23036 rate=200.00 Hz dt[min/mean/max]=4525/5000.0/5141 us within4.5-5.5ms=100.00% skipped_slots=0 buffer_drops=0 max_diagnostic_us=1083 imu_read_failures=0 imu_recoveries=0 saturated=0
+[   15.14s] [transport] Node 1 report=115 wifi_status=3 rssi=-43 dBm (0=unavailable) disconnects=1 reason=2 heap=192252 failed[data/control]=0/0 errors[ENOMEM/busy/network/other]=[0, 0, 0, 0] last=none errno=0 at_uptime_ms=0 last_wifi=0 cached_failure_rssi=0 age_ms=0
+[   15.14s] [txqueue] offered=2019 accepted=2018 pending=1 FINAL_DROPS=0 recovered_samples=0 retry_calls=0 high_water=6/128 oldest_ms=0 max_age_ms=25 drop_causes[overflow/expiry/permanent/cancel]=0/0/0/0
+[   15.14s] [this-capture] offered=104 accepted=104 received=104 final_local_drops=0 accepted_not_received=0 excluded_historical_bursts=['4', '5', '1', '2', '3'] partial_bursts=[] pending_bursts=['7']; Final consistent bursts starting at/after the first observed acquisition boundary; historical and partial bursts excluded.
+[   15.16s] [sample] Node 1 burst=7 seq=23094 t_us=131204796 dt_us=5059 accel=(+0.822,+0.075,+1.132) g gyro=(+33.92,+57.27,-37.69) dps
+[   15.69s] [sample] Node 1 burst=7 seq=23199 t_us=131729791 dt_us=5054 accel=(-0.034,+0.361,+0.900) g gyro=(+1.48,-6.13,+6.87) dps
+[   15.80s] [burst] Node 1 boot=d78264f8 burst=7 attempted=653 accepted=653 local_fail=0 received_unique=653 accepted_not_received=0 duplicates=0 reordered=0 (boot evidence; may predate this capture)
+[   20.23s] [timing] Node 1 boot=d78264f8 state=STREAMING acquired=24039 rate=200.00 Hz dt[min/mean/max]=4525/5000.0/5141 us within4.5-5.5ms=100.00% skipped_slots=0 buffer_drops=0 max_diagnostic_us=1083 imu_read_failures=0 imu_recoveries=0 saturated=0
+[   20.23s] [transport] Node 1 report=120 wifi_status=3 rssi=-39 dBm (0=unavailable) disconnects=1 reason=2 heap=192260 failed[data/control]=0/0 errors[ENOMEM/busy/network/other]=[0, 0, 0, 0] last=none errno=0 at_uptime_ms=0 last_wifi=0 cached_failure_rssi=0 age_ms=0
+[   20.23s] [txqueue] offered=2201 accepted=2201 pending=0 FINAL_DROPS=0 recovered_samples=0 retry_calls=0 high_water=6/128 oldest_ms=0 max_age_ms=25 drop_causes[overflow/expiry/permanent/cancel]=0/0/0/0
+[   20.23s] [this-capture] offered=757 accepted=757 received=757 final_local_drops=0 accepted_not_received=0 excluded_historical_bursts=['4', '5', '1', '2', '3'] partial_bursts=[] pending_bursts=[]; Final consistent bursts starting at/after the first observed acquisition boundary; historical and partial bursts excluded.
+[   22.87s] [sample] Node 1 burst=8 seq=24635 t_us=138909729 dt_us=4995 accel=(+0.483,+0.334,+1.076) g gyro=(-5.50,+18.45,+45.48) dps
+[   23.37s] [sample] Node 1 burst=8 seq=24735 t_us=139409798 dt_us=5061 accel=(-0.539,+0.585,+0.789) g gyro=(+8.60,-14.96,-35.85) dps
+[   23.87s] [sample] Node 1 burst=8 seq=24835 t_us=139909806 dt_us=5069 accel=(-0.308,+0.499,+0.884) g gyro=(-36.85,-28.59,+90.50) dps
+[   24.38s] [sample] Node 1 burst=8 seq=24935 t_us=140409793 dt_us=5056 accel=(+0.597,+0.178,+0.970) g gyro=(+5.49,+0.13,-41.14) dps
+[   24.77s] [burst] Node 1 boot=d78264f8 burst=8 attempted=387 accepted=387 local_fail=0 received_unique=387 accepted_not_received=0 duplicates=0 reordered=0 (boot evidence; may predate this capture)
+[   25.24s] [timing] Node 1 boot=d78264f8 state=STREAMING acquired=25040 rate=200.00 Hz dt[min/mean/max]=4525/5000.0/5141 us within4.5-5.5ms=100.00% skipped_slots=0 buffer_drops=0 max_diagnostic_us=1083 imu_read_failures=0 imu_recoveries=0 saturated=0
+[   25.24s] [transport] Node 1 report=125 wifi_status=3 rssi=-42 dBm (0=unavailable) disconnects=1 reason=2 heap=192260 failed[data/control]=0/0 errors[ENOMEM/busy/network/other]=[0, 0, 0, 0] last=none errno=0 at_uptime_ms=0 last_wifi=0 cached_failure_rssi=0 age_ms=0
+[   25.24s] [txqueue] offered=2588 accepted=2588 pending=0 FINAL_DROPS=0 recovered_samples=0 retry_calls=0 high_water=6/128 oldest_ms=0 max_age_ms=25 drop_causes[overflow/expiry/permanent/cancel]=0/0/0/0
+[   25.24s] [this-capture] offered=1144 accepted=1144 received=1144 final_local_drops=0 accepted_not_received=0 excluded_historical_bursts=['4', '5', '1', '2', '3'] partial_bursts=[] pending_bursts=[]; Final consistent bursts starting at/after the first observed acquisition boundary; historical and partial bursts excluded.
+[   30.26s] [timing] Node 1 boot=d78264f8 state=STREAMING acquired=26040 rate=200.00 Hz dt[min/mean/max]=4525/5000.0/5141 us within4.5-5.5ms=100.00% skipped_slots=0 buffer_drops=0 max_diagnostic_us=1114 imu_read_failures=0 imu_recoveries=0 saturated=0
+[   30.26s] [transport] Node 1 report=130 wifi_status=3 rssi=-42 dBm (0=unavailable) disconnects=1 reason=2 heap=192260 failed[data/control]=0/0 errors[ENOMEM/busy/network/other]=[0, 0, 0, 0] last=none errno=0 at_uptime_ms=0 last_wifi=0 cached_failure_rssi=0 age_ms=0
+[   30.26s] [txqueue] offered=2588 accepted=2588 pending=0 FINAL_DROPS=0 recovered_samples=0 retry_calls=0 high_water=6/128 oldest_ms=0 max_age_ms=25 drop_causes[overflow/expiry/permanent/cancel]=0/0/0/0
+[   30.26s] [this-capture] offered=1144 accepted=1144 received=1144 final_local_drops=0 accepted_not_received=0 excluded_historical_bursts=['4', '5', '1', '2', '3'] partial_bursts=[] pending_bursts=[]; Final consistent bursts starting at/after the first observed acquisition boundary; historical and partial bursts excluded.
+[   30.84s] [sample] Node 1 burst=9 seq=26231 t_us=146889734 dt_us=5005 accel=(-0.039,+0.312,+0.627) g gyro=(+45.57,-12.51,+2.09) dps
+[   31.34s] [sample] Node 1 burst=9 seq=26331 t_us=147389798 dt_us=5069 accel=(+0.003,+0.162,+0.969) g gyro=(-11.90,-0.04,+0.31) dps
+[   31.45s] [burst] Node 1 boot=d78264f8 burst=9 attempted=125 accepted=125 local_fail=0 received_unique=125 accepted_not_received=0 duplicates=0 reordered=0 (boot evidence; may predate this capture)
+[   35.34s] [timing] Node 1 boot=d78264f8 state=STREAMING acquired=27042 rate=200.00 Hz dt[min/mean/max]=4525/5000.0/5141 us within4.5-5.5ms=100.00% skipped_slots=0 buffer_drops=0 max_diagnostic_us=1114 imu_read_failures=0 imu_recoveries=0 saturated=0
+[   35.34s] [transport] Node 1 report=135 wifi_status=3 rssi=-42 dBm (0=unavailable) disconnects=1 reason=2 heap=192260 failed[data/control]=0/0 errors[ENOMEM/busy/network/other]=[0, 0, 0, 0] last=none errno=0 at_uptime_ms=0 last_wifi=0 cached_failure_rssi=0 age_ms=0
+[   35.34s] [txqueue] offered=2713 accepted=2713 pending=0 FINAL_DROPS=0 recovered_samples=0 retry_calls=0 high_water=6/128 oldest_ms=0 max_age_ms=25 drop_causes[overflow/expiry/permanent/cancel]=0/0/0/0
+[   35.35s] [this-capture] offered=1269 accepted=1269 received=1269 final_local_drops=0 accepted_not_received=0 excluded_historical_bursts=['4', '5', '1', '2', '3'] partial_bursts=[] pending_bursts=[]; Final consistent bursts starting at/after the first observed acquisition boundary; historical and partial bursts excluded.
+[   40.36s] [timing] Node 1 boot=d78264f8 state=STREAMING acquired=28043 rate=200.00 Hz dt[min/mean/max]=4525/5000.0/5141 us within4.5-5.5ms=100.00% skipped_slots=0 buffer_drops=0 max_diagnostic_us=1114 imu_read_failures=0 imu_recoveries=0 saturated=0
+[   40.36s] [transport] Node 1 report=140 wifi_status=3 rssi=-38 dBm (0=unavailable) disconnects=1 reason=2 heap=191824 failed[data/control]=0/0 errors[ENOMEM/busy/network/other]=[0, 0, 0, 0] last=none errno=0 at_uptime_ms=0 last_wifi=0 cached_failure_rssi=0 age_ms=0
+[   40.36s] [txqueue] offered=2713 accepted=2713 pending=0 FINAL_DROPS=0 recovered_samples=0 retry_calls=0 high_water=6/128 oldest_ms=0 max_age_ms=25 drop_causes[overflow/expiry/permanent/cancel]=0/0/0/0
+[   40.36s] [this-capture] offered=1269 accepted=1269 received=1269 final_local_drops=0 accepted_not_received=0 excluded_historical_bursts=['4', '5', '1', '2', '3'] partial_bursts=[] pending_bursts=[]; Final consistent bursts starting at/after the first observed acquisition boundary; historical and partial bursts excluded.
+[   41.33s] Capture stopped by user.
+[   41.33s] FINAL CAPTURE SUMMARY
+[   41.33s] [timing] Node 1 boot=d78264f8 state=STREAMING acquired=28243 rate=200.00 Hz dt[min/mean/max]=4525/5000.0/5141 us within4.5-5.5ms=100.00% skipped_slots=0 buffer_drops=0 max_diagnostic_us=1114 imu_read_failures=0 imu_recoveries=0 saturated=0
+[   41.33s] [transport] Node 1 report=141 wifi_status=3 rssi=-43 dBm (0=unavailable) disconnects=1 reason=2 heap=192260 failed[data/control]=0/0 errors[ENOMEM/busy/network/other]=[0, 0, 0, 0] last=none errno=0 at_uptime_ms=0 last_wifi=0 cached_failure_rssi=0 age_ms=0
+[   41.33s] [txqueue] offered=2713 accepted=2713 pending=0 FINAL_DROPS=0 recovered_samples=0 retry_calls=0 high_water=6/128 oldest_ms=0 max_age_ms=25 drop_causes[overflow/expiry/permanent/cancel]=0/0/0/0
+[   41.33s] [this-capture] offered=1269 accepted=1269 received=1269 final_local_drops=0 accepted_not_received=0 excluded_historical_bursts=['4', '5', '1', '2', '3'] partial_bursts=[] pending_bursts=[]; Final consistent bursts starting at/after the first observed acquisition boundary; historical and partial bursts excluded.
+[   41.33s] [burst] Node 1 boot=d78264f8 burst=1 attempted=104 accepted=104 local_fail=0 received_unique=0 accepted_not_received=104 duplicates=0 reordered=0
+[   41.33s] [burst] Node 1 boot=d78264f8 burst=2 attempted=584 accepted=584 local_fail=0 received_unique=0 accepted_not_received=584 duplicates=0 reordered=0
+[   41.33s] [burst] Node 1 boot=d78264f8 burst=3 attempted=125 accepted=125 local_fail=0 received_unique=0 accepted_not_received=125 duplicates=0 reordered=0
+[   41.33s] [burst] Node 1 boot=d78264f8 burst=4 attempted=480 accepted=480 local_fail=0 received_unique=0 accepted_not_received=480 duplicates=0 reordered=0
+[   41.33s] [burst] Node 1 boot=d78264f8 burst=5 attempted=151 accepted=151 local_fail=0 received_unique=0 accepted_not_received=151 duplicates=0 reordered=0
+[   41.33s] [burst] Node 1 boot=d78264f8 burst=6 attempted=104 accepted=104 local_fail=0 received_unique=104 accepted_not_received=0 duplicates=0 reordered=0
+[   41.33s] [burst] Node 1 boot=d78264f8 burst=7 attempted=653 accepted=653 local_fail=0 received_unique=653 accepted_not_received=0 duplicates=0 reordered=0
+[   41.33s] [burst] Node 1 boot=d78264f8 burst=8 attempted=387 accepted=387 local_fail=0 received_unique=387 accepted_not_received=0 duplicates=0 reordered=0
+[   41.33s] [burst] Node 1 boot=d78264f8 burst=9 attempted=125 accepted=125 local_fail=0 received_unique=125 accepted_not_received=0 duplicates=0 reordered=0
+[   41.33s] [coverage] startup_observed=False range_readback_verified=True unseen_bursts=0 bursts_without_final_summary=[]
+[   41.33s] [gate-idle] mean_corrected_gyro_dps=[0.16632297540148844, -0.2259300935761849, -0.12638890677634157]
+[   41.33s] Saved samples.csv, diagnostics.jsonl, summary.json, metadata.json and capture.log in C:\Users\USER\Documents\NUS\Y3S1_mods\CG4002\CG4002_final_project\captures\p1_p2_20261014_080025_009689

@@ -1,0 +1,560 @@
+{
+  "protocol": 4,
+  "protocol_versions": [
+    4
+  ],
+  "invalid_packets": 0,
+  "sessions": [
+    {
+      "node": 1,
+      "boot": 3615646968,
+      "state": "STREAMING",
+      "protocol_versions": [
+        4
+      ],
+      "observed_startup": false,
+      "configuration": {
+        "v": 4,
+        "type": "config",
+        "node": 1,
+        "boot": 3615646968,
+        "produced": 28052,
+        "state": "STREAMING",
+        "verified": true,
+        "who": 68,
+        "gyro_config": 39,
+        "accel_config": 39,
+        "pwr_mgmt": 15,
+        "gyro_fs_dps": 2000,
+        "accel_fs_g": 16,
+        "gyro_lsb_per_dps": 16.4,
+        "accel_lsb_per_g": 2048.0,
+        "period_us": 5000,
+        "diag_scheduler": "staggered_v1",
+        "telemetry_headroom_us": 3500,
+        "calibration_samples": 400,
+        "gyro_bias_counts": [
+          0.33,
+          -6.4875,
+          9.6425
+        ],
+        "accel_offset_g": [
+          -0.03527,
+          0.032504,
+          0.006858
+        ],
+        "alpha": 0.2,
+        "gyro_start_dps": 40.0,
+        "gyro_stop_dps": 15.0,
+        "accel_start_g": 0.3,
+        "accel_stop_g": 0.15,
+        "quiet_ms": 150
+      },
+      "range_readback_verified": true,
+      "timing": {
+        "produced": 28243,
+        "interval_count": 28242,
+        "acquisition_span_s": 141.209508,
+        "achieved_hz": 200.0006968369297,
+        "mean_interval_us": 4999.982579137455,
+        "min_interval_us": 4525,
+        "max_interval_us": 5141,
+        "interval_histogram_us": {
+          "<4000": 0,
+          "4000-4499": 0,
+          "4500-5499": 28242,
+          "5500-5999": 0,
+          "6000-9999": 0,
+          ">=10000": 0
+        },
+        "within_4500_5499_percent": 100.0,
+        "skipped_deadlines": 0,
+        "max_lateness_us": 300,
+        "max_read_us": 685,
+        "max_processing_us": 78,
+        "max_wifi_send_us": 2678,
+        "buffer_drops": 0,
+        "max_diagnostic_service_us": 1114,
+        "buffer_high_water": 1,
+        "diagnostic_send_failures": 0,
+        "idle_samples": 25530,
+        "gate_idle_mean_corrected_gyro_dps": [
+          0.16632297540148844,
+          -0.2259300935761849,
+          -0.12638890677634157
+        ],
+        "gate_idle_mean_calibrated_accel_g": [
+          0.00022409059929494714,
+          0.16464927175871524,
+          0.9751554762632197
+        ],
+        "scope": "All completed device acquisitions since boot, through the latest received timing report; includes idle."
+      },
+      "latest_device_counters": {
+        "v": 4,
+        "type": "timing",
+        "node": 1,
+        "boot": 3615646968,
+        "state": "STREAMING",
+        "produced": 28243,
+        "intervals": 28242,
+        "sum_dt_us": 141209508,
+        "min_dt_us": 4525,
+        "max_dt_us": 5141,
+        "hist": [
+          0,
+          0,
+          28242,
+          0,
+          0,
+          0
+        ],
+        "skipped_deadlines": 0,
+        "max_late_us": 300,
+        "max_read_us": 685,
+        "max_processing_us": 78,
+        "max_wifi_us": 2678,
+        "max_diag_us": 1114,
+        "dropped": 0,
+        "high_water": 1,
+        "attempted": 2713,
+        "accepted": 2713,
+        "failed": 0,
+        "pending": 0,
+        "diag_failed": 0,
+        "bursts_started": 9,
+        "active_burst": 0,
+        "idle_samples": 25530,
+        "imu_read_failures": 0,
+        "imu_consecutive": 0,
+        "imu_max_consecutive": 0,
+        "imu_recovery_attempts": 0,
+        "imu_recoveries": 0,
+        "saturated_samples": 0,
+        "idle_gyro_sum": [
+          4246.225562,
+          -5767.995289,
+          -3226.70879
+        ],
+        "idle_accel_sum": [
+          5.721033,
+          4203.495908,
+          24895.719309
+        ]
+      },
+      "transport": {
+        "v": 4,
+        "type": "transport",
+        "node": 1,
+        "boot": 3615646968,
+        "produced": 28248,
+        "report": 141,
+        "backend": "lwip_queued_v2",
+        "time_ms": 156969,
+        "attempted": 1152,
+        "accepted": 1152,
+        "failed": 0,
+        "data_failed": 0,
+        "control_failed": 0,
+        "stages": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "errors": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "last_errno": 0,
+        "last_stage": 0,
+        "last_data": false,
+        "last_ms": 0,
+        "last_bytes": 0,
+        "last_sent": 0,
+        "last_wifi": 0,
+        "last_rssi": 0,
+        "last_rssi_age_ms": 0,
+        "last_heap": 0,
+        "wifi_status": 3,
+        "rssi_dbm": -43,
+        "disconnects": 1,
+        "last_disconnect_reason": 2,
+        "last_disconnect_ms": 9510,
+        "heap_free": 192260,
+        "heap_min": 187648
+      },
+      "txqueue": {
+        "v": 4,
+        "type": "txqueue",
+        "node": 1,
+        "boot": 3615646968,
+        "produced": 28250,
+        "report": 141,
+        "offered": 2713,
+        "accepted": 2713,
+        "dropped": 0,
+        "pending": 0,
+        "recovered": 0,
+        "overflow": 0,
+        "expired": 0,
+        "permanent": 0,
+        "cancelled": 0,
+        "calls": 545,
+        "errors": 0,
+        "retries": 0,
+        "datagrams": 545,
+        "high_water": 6,
+        "max_age_ms": 25,
+        "oldest_ms": 0,
+        "capacity": 128,
+        "batch_size": 5,
+        "flush_ms": 20,
+        "max_age_limit_ms": 1000,
+        "retry_ms": 10
+      },
+      "capture_delivery": {
+        "sender_attempted": 1269,
+        "sender_accepted": 1269,
+        "local_send_failures": 0,
+        "received_unique": 1269,
+        "accepted_not_received": 0,
+        "not_captured": 0,
+        "received_percent_of_attempted": 100.0,
+        "start_seq": 20232,
+        "finalized_burst_ids": [
+          "6",
+          "7",
+          "8",
+          "9"
+        ],
+        "historical_burst_ids": [
+          "4",
+          "5",
+          "1",
+          "2",
+          "3"
+        ],
+        "partial_burst_ids": [],
+        "pending_burst_ids": [],
+        "scope": "Final consistent bursts starting at/after the first observed acquisition boundary; historical and partial bursts excluded.",
+        "bursts_started": 4,
+        "unseen_burst_count": 0
+      },
+      "capture_counter_changes": {
+        "produced": 8011,
+        "skipped_deadlines": 0,
+        "dropped": 0,
+        "failed": 0,
+        "diag_failed": 0
+      },
+      "capture_transport_changes": {
+        "attempted": 433,
+        "accepted": 433,
+        "failed": 0,
+        "data_failed": 0,
+        "control_failed": 0,
+        "disconnects": 0
+      },
+      "capture_queue_changes": {
+        "offered": 1269,
+        "accepted": 1269,
+        "dropped": 0,
+        "recovered": 0,
+        "overflow": 0,
+        "expired": 0,
+        "permanent": 0,
+        "cancelled": 0,
+        "calls": 255,
+        "errors": 0,
+        "retries": 0,
+        "datagrams": 255
+      },
+      "bursts": {
+        "1": {
+          "received_unique": 0,
+          "duplicates": 0,
+          "reordered": 0,
+          "conflicting_packets": 0,
+          "complete_sender_summary": true,
+          "pending_samples": 0,
+          "gate_closed": true,
+          "interrupted": false,
+          "sender_attempted": 104,
+          "sender_accepted": 104,
+          "local_send_failures": 0,
+          "counts_consistent": true,
+          "accepted_not_received": 104,
+          "unreceived_attempt_indexes": {
+            "ranges": [
+              [
+                0,
+                103
+              ]
+            ],
+            "range_count": 1,
+            "truncated": false
+          },
+          "first_seq": 1426,
+          "last_seq": 1529,
+          "first_us": 22864729,
+          "last_us": 23379728,
+          "explanation": "Accepted by the device UDP API but not captured here; may include receiver downtime. Absent attempt indexes include local send failures. Late UDP packets may revise this count."
+        },
+        "2": {
+          "received_unique": 0,
+          "duplicates": 0,
+          "reordered": 0,
+          "conflicting_packets": 0,
+          "complete_sender_summary": true,
+          "pending_samples": 0,
+          "gate_closed": true,
+          "interrupted": false,
+          "sender_attempted": 584,
+          "sender_accepted": 584,
+          "local_send_failures": 0,
+          "counts_consistent": true,
+          "accepted_not_received": 584,
+          "unreceived_attempt_indexes": {
+            "ranges": [
+              [
+                0,
+                583
+              ]
+            ],
+            "range_count": 1,
+            "truncated": false
+          },
+          "first_seq": 1707,
+          "last_seq": 2290,
+          "first_us": 24269728,
+          "last_us": 27184734,
+          "explanation": "Accepted by the device UDP API but not captured here; may include receiver downtime. Absent attempt indexes include local send failures. Late UDP packets may revise this count."
+        },
+        "3": {
+          "received_unique": 0,
+          "duplicates": 0,
+          "reordered": 0,
+          "conflicting_packets": 0,
+          "complete_sender_summary": true,
+          "pending_samples": 0,
+          "gate_closed": true,
+          "interrupted": false,
+          "sender_attempted": 125,
+          "sender_accepted": 125,
+          "local_send_failures": 0,
+          "counts_consistent": true,
+          "accepted_not_received": 125,
+          "unreceived_attempt_indexes": {
+            "ranges": [
+              [
+                0,
+                124
+              ]
+            ],
+            "range_count": 1,
+            "truncated": false
+          },
+          "first_seq": 2299,
+          "last_seq": 2423,
+          "first_us": 27229729,
+          "last_us": 27849737,
+          "explanation": "Accepted by the device UDP API but not captured here; may include receiver downtime. Absent attempt indexes include local send failures. Late UDP packets may revise this count."
+        },
+        "4": {
+          "received_unique": 0,
+          "duplicates": 0,
+          "reordered": 0,
+          "conflicting_packets": 0,
+          "complete_sender_summary": true,
+          "pending_samples": 0,
+          "gate_closed": true,
+          "interrupted": false,
+          "sender_attempted": 480,
+          "sender_accepted": 480,
+          "local_send_failures": 0,
+          "counts_consistent": true,
+          "accepted_not_received": 480,
+          "unreceived_attempt_indexes": {
+            "ranges": [
+              [
+                0,
+                479
+              ]
+            ],
+            "range_count": 1,
+            "truncated": false
+          },
+          "first_seq": 3468,
+          "last_seq": 3947,
+          "first_us": 33074737,
+          "last_us": 35469737,
+          "explanation": "Accepted by the device UDP API but not captured here; may include receiver downtime. Absent attempt indexes include local send failures. Late UDP packets may revise this count."
+        },
+        "5": {
+          "received_unique": 0,
+          "duplicates": 0,
+          "reordered": 0,
+          "conflicting_packets": 0,
+          "complete_sender_summary": true,
+          "pending_samples": 0,
+          "gate_closed": true,
+          "interrupted": false,
+          "sender_attempted": 151,
+          "sender_accepted": 151,
+          "local_send_failures": 0,
+          "counts_consistent": true,
+          "accepted_not_received": 151,
+          "unreceived_attempt_indexes": {
+            "ranges": [
+              [
+                0,
+                150
+              ]
+            ],
+            "range_count": 1,
+            "truncated": false
+          },
+          "first_seq": 4388,
+          "last_seq": 4538,
+          "first_us": 37674728,
+          "last_us": 38424791,
+          "explanation": "Accepted by the device UDP API but not captured here; may include receiver downtime. Absent attempt indexes include local send failures. Late UDP packets may revise this count."
+        },
+        "6": {
+          "received_unique": 104,
+          "duplicates": 0,
+          "reordered": 0,
+          "conflicting_packets": 0,
+          "complete_sender_summary": true,
+          "pending_samples": 0,
+          "gate_closed": true,
+          "interrupted": false,
+          "sender_attempted": 104,
+          "sender_accepted": 104,
+          "local_send_failures": 0,
+          "counts_consistent": true,
+          "accepted_not_received": 0,
+          "unreceived_attempt_indexes": {
+            "ranges": [],
+            "range_count": 0,
+            "truncated": false
+          },
+          "first_seq": 22301,
+          "last_seq": 22404,
+          "first_us": 127239737,
+          "last_us": 127754729,
+          "explanation": "Accepted by the device UDP API but not captured here; may include receiver downtime. Absent attempt indexes include local send failures. Late UDP packets may revise this count."
+        },
+        "7": {
+          "received_unique": 653,
+          "duplicates": 0,
+          "reordered": 0,
+          "conflicting_packets": 0,
+          "complete_sender_summary": true,
+          "pending_samples": 0,
+          "gate_closed": true,
+          "interrupted": false,
+          "sender_attempted": 653,
+          "sender_accepted": 653,
+          "local_send_failures": 0,
+          "counts_consistent": true,
+          "accepted_not_received": 0,
+          "unreceived_attempt_indexes": {
+            "ranges": [],
+            "range_count": 0,
+            "truncated": false
+          },
+          "first_seq": 22574,
+          "last_seq": 23226,
+          "first_us": 128604733,
+          "last_us": 131864734,
+          "explanation": "Accepted by the device UDP API but not captured here; may include receiver downtime. Absent attempt indexes include local send failures. Late UDP packets may revise this count."
+        },
+        "8": {
+          "received_unique": 387,
+          "duplicates": 0,
+          "reordered": 0,
+          "conflicting_packets": 0,
+          "complete_sender_summary": true,
+          "pending_samples": 0,
+          "gate_closed": true,
+          "interrupted": false,
+          "sender_attempted": 387,
+          "sender_accepted": 387,
+          "local_send_failures": 0,
+          "counts_consistent": true,
+          "accepted_not_received": 0,
+          "unreceived_attempt_indexes": {
+            "ranges": [],
+            "range_count": 0,
+            "truncated": false
+          },
+          "first_seq": 24635,
+          "last_seq": 25021,
+          "first_us": 138909729,
+          "last_us": 140839730,
+          "explanation": "Accepted by the device UDP API but not captured here; may include receiver downtime. Absent attempt indexes include local send failures. Late UDP packets may revise this count."
+        },
+        "9": {
+          "received_unique": 125,
+          "duplicates": 0,
+          "reordered": 0,
+          "conflicting_packets": 0,
+          "complete_sender_summary": true,
+          "pending_samples": 0,
+          "gate_closed": true,
+          "interrupted": false,
+          "sender_attempted": 125,
+          "sender_accepted": 125,
+          "local_send_failures": 0,
+          "counts_consistent": true,
+          "accepted_not_received": 0,
+          "unreceived_attempt_indexes": {
+            "ranges": [],
+            "range_count": 0,
+            "truncated": false
+          },
+          "first_seq": 26231,
+          "last_seq": 26355,
+          "first_us": 146889734,
+          "last_us": 147509729,
+          "explanation": "Accepted by the device UDP API but not captured here; may include receiver downtime. Absent attempt indexes include local send failures. Late UDP packets may revise this count."
+        }
+      },
+      "finalized_burst_totals": {
+        "sender_attempted": 2713,
+        "sender_accepted": 2713,
+        "local_send_failures": 0,
+        "received_unique": 1269,
+        "accepted_not_received": 1444,
+        "scope": "Only bursts with final, consistent sender summaries. Counts can include a partial receiver capture.",
+        "not_captured": 1444,
+        "received_percent_of_attempted": 46.77478805750092
+      },
+      "unseen_burst_count": 0,
+      "unseen_burst_ids": {
+        "ranges": [],
+        "range_count": 0,
+        "truncated": false
+      },
+      "bursts_without_final_summary": []
+    }
+  ],
+  "interpretation": [
+    "Device and laptop clocks are not synchronized; no one-way latency is calculated.",
+    "Timing is completed register-read cadence, not proof that every sensor ODR update is unique/captured.",
+    "A missing final burst summary is incomplete evidence, not zero loss.",
+    "A timeout indicates silence/staleness, not a movement boundary.",
+    "Configuration readback aligns conversion with the selected range; it is not reference-rate calibration.",
+    "Gate-idle averages require the operator to confirm the sensor was stationary."
+  ],
+  "metadata": {
+    "started_utc": "2026-10-14T00:00:25.010527+00:00",
+    "operator_reported_power_source": "lipo-usb-disconnected",
+    "notes": ""
+  },
+  "duration_s": 41.32566239999869
+}

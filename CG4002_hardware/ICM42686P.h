@@ -14,6 +14,16 @@ struct ImuRegisterReadback {
   bool verified = false;
 };
 
+// Last failed transaction is retained across successful reads for diagnosis.
+// Wire does not expose the underlying ESP-IDF error for requestFrom().
+struct ImuIoError {
+  const char* stage = "none";
+  uint8_t reg = 0;
+  uint8_t wireStatus = 0;
+  size_t expected = 0;
+  size_t received = 0;
+};
+
 class ICM42686P {
 
 public:
@@ -25,6 +35,7 @@ public:
   bool begin(TwoWire& wire, uint8_t address = DEFAULT_ADDRESS);
   bool readRaw(SensorFrame& frame);
   const ImuRegisterReadback& configuration() const { return readback; }
+  const ImuIoError& lastError() const { return ioError; }
 
   uint8_t readRegister(uint8_t address);
   bool writeRegister(uint8_t address, uint8_t value);
@@ -33,6 +44,7 @@ private:
   TwoWire* bus;
   uint8_t deviceAddress;
   ImuRegisterReadback readback;
+  ImuIoError ioError;
 
   bool readRegisters(uint8_t startAddress, uint8_t* data, size_t length);
 };

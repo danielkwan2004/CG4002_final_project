@@ -41,6 +41,13 @@ void CaptureDiagnostics::recordIdle(const SensorFrame& frame, const GyroCalibrat
   idleAccelSum[2] += frame.az_g;
 }
 
+void CaptureDiagnostics::recordMissedAcquisition(unsigned long readUs,
+    unsigned long latenessUs, uint32_t skipped) {
+  skippedDeadlines += skipped;
+  if (readUs > maxReadUs) maxReadUs = readUs;
+  if (latenessUs > maxLatenessUs) maxLatenessUs = latenessUs;
+}
+
 void CaptureDiagnostics::startBurst(const SensorFrame& frame) {
   current = BurstCounters();
   current.id = ++burstCount;
@@ -92,18 +99,20 @@ bool CaptureDiagnostics::sendBurst(WiFiTelemetry& wifi, const BurstCounters& bur
   int length = snprintf(packet, sizeof(packet),
       "{\"v\":4,\"type\":\"burst\",\"node\":%u,\"boot\":%lu,\"id\":%lu,"
       "\"closed\":%s,\"gate_closed\":%s,\"pending\":%lu,\"first_seq\":%lu,\"last_seq\":%lu,\"first_us\":%lu,"
-      "\"last_us\":%lu,\"attempted\":%lu,\"accepted\":%lu,\"failed\":%lu}",
+      "\"last_us\":%lu,\"attempted\":%lu,\"accepted\":%lu,\"failed\":%lu,\"interrupted\":%s}",
       nodeId, (unsigned long)bootId, (unsigned long)burst.id,
       burst.gateClosed && burst.pending == 0 ? "true" : "false",
       burst.gateClosed ? "true" : "false", (unsigned long)burst.pending,
       (unsigned long)burst.firstSeq,
       (unsigned long)burst.lastSeq, burst.firstUs, burst.lastUs,
       (unsigned long)burst.attempted, (unsigned long)burst.accepted,
-      (unsigned long)burst.failed);
+      (unsigned long)burst.failed, burst.interrupted ? "true" : "false");
   return sendJson(wifi, packet, length, sizeof(packet));
 }
 
-void CaptureDiagnostics::endBurst(WiFiTelemetry& wifi) {
+void CaptureDiagnostics::endBurst(WiFiTelemetry& wifi, bool interrupted) {
+  if (!current.id) return;
+  current.interrupted = interrupted;
   current.gateClosed = true;
   wifi.closeBurst(current.id);
   if (history[historyWrite].pending)
@@ -245,6 +254,8 @@ void CaptureDiagnostics::sendTiming(WiFiTelemetry& wifi, const char* state,
       "\"max_processing_us\":%lu,\"max_wifi_us\":%lu,\"max_diag_us\":%lu,\"dropped\":%lu,\"high_water\":%d,"
       "\"attempted\":%lu,\"accepted\":%lu,\"failed\":%lu,\"pending\":%lu,\"diag_failed\":%lu,"
       "\"bursts_started\":%lu,\"active_burst\":%lu,\"idle_samples\":%lu,"
+      "\"imu_read_failures\":%lu,\"imu_consecutive\":%lu,\"imu_max_consecutive\":%lu,"
+      "\"imu_recovery_attempts\":%lu,\"imu_recoveries\":%lu,\"saturated_samples\":%lu,"
       "\"idle_gyro_sum\":[%.6f,%.6f,%.6f],\"idle_accel_sum\":[%.6f,%.6f,%.6f]}",
       nodeId, (unsigned long)bootId, state, (unsigned long)produced,
       (unsigned long)intervals, (unsigned long long)intervalSumUs,
@@ -257,7 +268,11 @@ void CaptureDiagnostics::sendTiming(WiFiTelemetry& wifi, const char* state,
       (unsigned long)accepted, (unsigned long)failed, (unsigned long)pending,
       (unsigned long)diagnosticFailures,
       (unsigned long)burstCount, (unsigned long)current.id,
-      (unsigned long)idleSamples, idleGyroSum[0], idleGyroSum[1], idleGyroSum[2],
+      (unsigned long)idleSamples,
+      (unsigned long)imuHealth.readFailures, (unsigned long)imuHealth.consecutive,
+      (unsigned long)imuHealth.maxConsecutive, (unsigned long)imuHealth.recoveryAttempts,
+      (unsigned long)imuHealth.recoveries, (unsigned long)imuHealth.saturated,
+      idleGyroSum[0], idleGyroSum[1], idleGyroSum[2],
       idleAccelSum[0], idleAccelSum[1], idleAccelSum[2]);
   sendJson(wifi, packet, length, sizeof(packet));
 }

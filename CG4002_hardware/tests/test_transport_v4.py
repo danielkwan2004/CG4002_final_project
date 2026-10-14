@@ -35,6 +35,32 @@ def v4burst(attempts=3, accepted=1, pending=2, gate_closed=True):
 
 
 class QueuedProtocolTests(unittest.TestCase):
+    def test_imu_health_and_interruption_preserved(self):
+        p = timing()
+        p.update(v=4, imu_read_failures=21, imu_consecutive=0, imu_max_consecutive=20,
+                 imu_recovery_attempts=2, imu_recoveries=1, saturated_samples=150)
+        s = Session(1, 77)
+        s.ingest(parse_packet(json.dumps(p).encode()), 0)
+        self.assertIn("imu_read_failures=21 imu_recoveries=1 saturated=150", describe_timing(s))
+        b = v4burst(accepted=3, pending=0)
+        b["interrupted"] = True
+        s.ingest(parse_packet(json.dumps(b).encode()), 1)
+        self.assertTrue(s.bursts[1].summary()["interrupted"])
+        for invalid in (-1, True, 1.5):
+            p["imu_read_failures"] = invalid
+            with self.assertRaises(ValueError):
+                parse_packet(json.dumps(p).encode())
+
+    def test_recovered_streaming_supersedes_fault_after_new_acquisition(self):
+        s = Session(1, 77)
+        fault = timing(401)
+        fault["state"] = "FAULT"
+        s.ingest(fault, 0)
+        s.ingest(timing(402), 1)
+        self.assertEqual(s.latest_state, "STREAMING")
+        s.ingest(fault, 2)
+        self.assertEqual(s.latest_state, "STREAMING")
+
     def test_staggered_diagnostic_cost_preserved_and_optional(self):
         p = timing()
         self.assertIsNone(timing_summary(p)["max_diagnostic_service_us"])

@@ -55,6 +55,8 @@ def parse_packet(payload):
         kind = p.get("type")
         pending = integer(p.get("pending", 0), "pending")
         if kind == "burst":
+            if "interrupted" in p and not isinstance(p["interrupted"], bool):
+                raise ValueError("invalid burst interruption flag")
             for key in ("id", "first_seq", "last_seq", "first_us", "last_us", "attempted", "accepted", "failed"):
                 integer(p.get(key), key, 1 if key == "id" else 0)
             if (not isinstance(p.get("closed"), bool)
@@ -64,6 +66,10 @@ def parse_packet(payload):
                     or p["closed"] != (p["gate_closed"] and pending == 0)):
                 raise ValueError("invalid burst finalization")
         elif kind == "timing":
+            for key in ("imu_read_failures", "imu_consecutive", "imu_max_consecutive",
+                        "imu_recovery_attempts", "imu_recoveries", "saturated_samples"):
+                if key in p:
+                    integer(p[key], key)
             if "max_diag_us" in p:
                 integer(p["max_diag_us"], "max_diag_us")
             for key in ("produced", "intervals", "min_dt_us", "max_dt_us", "skipped_deadlines",
@@ -230,6 +236,7 @@ class Burst:
                       complete_sender_summary=bool(self.sender and self.sender["closed"]))
         result["pending_samples"] = self.sender.get("pending", 0) if self.sender else None
         result["gate_closed"] = self.sender.get("gate_closed", self.sender["closed"]) if self.sender else None
+        result["interrupted"] = self.sender.get("interrupted", False) if self.sender else None
         if not result["complete_sender_summary"]:
             result.update(accepted_not_received=None, explanation="No final sender counts yet; delivery is incomplete evidence.")
             return result
@@ -462,7 +469,11 @@ def describe_timing(session):
             f"within4.5-5.5ms={t['within_4500_5499_percent']:.2f}% "
             f"skipped_slots={t['skipped_deadlines']} buffer_drops={t['buffer_drops']}"
             + (f" max_diagnostic_us={t['max_diagnostic_service_us']}"
-               if t['max_diagnostic_service_us'] is not None else ""))
+               if t['max_diagnostic_service_us'] is not None else "")
+            + (f" imu_read_failures={session.timing['imu_read_failures']}"
+               f" imu_recoveries={session.timing.get('imu_recoveries', 0)}"
+               f" saturated={session.timing.get('saturated_samples', 0)}"
+               if 'imu_read_failures' in session.timing else ""))
 
 
 def describe_burst(session, burst_id):
@@ -473,7 +484,8 @@ def describe_burst(session, burst_id):
     return (f"{prefix} attempted={b['sender_attempted']} accepted={b['sender_accepted']} "
             f"local_fail={b['local_send_failures']} received_unique={b['received_unique']} "
             f"accepted_not_received={b['accepted_not_received']} duplicates={b['duplicates']} "
-            f"reordered={b['reordered']}")
+            f"reordered={b['reordered']}"
+            + (" interrupted_by_imu_outage=True" if b['interrupted'] else ""))
 
 
 def describe_transport(session):

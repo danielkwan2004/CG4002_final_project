@@ -18,6 +18,7 @@ const uint8_t NODE_ID = 1;
 const AxisMapping& NODE_AXIS_MAPPING = AXIS_MAPPING_IDENTITY;
 const int I2C_SDA_PIN = 21;
 const int I2C_SCL_PIN = 22;
+const uint16_t I2C_TIMEOUT_MS = 5;
 const int HAPTIC_PIN = 25;
 const int HAPTIC_DUTY_ON = 255;  // module is only felt at duty >=200 on the bench
 const bool ENABLE_WIFI_TELEMETRY = true;
@@ -27,7 +28,7 @@ const bool WIFI_ONLY_DEMO = false;
 const bool ENABLE_VERBOSE_SAMPLE_LOG = false;
 const char* WIFI_DEMO_SSID = "Reno13";
 const char* WIFI_DEMO_PASSWORD = "12345678";
-const char* WIFI_LAPTOP_IP = "10.20.167.93";
+const char* WIFI_LAPTOP_IP = "10.123.219.93";
 const uint16_t WIFI_DEMO_PORT = 4210;
 
 unsigned long nextSampleTime;
@@ -97,6 +98,14 @@ enum NodeState {
 };
 
 NodeState nodeState = NODE_BOOT;
+const char* faultReason = "none";
+bool runtimeImuFault = false;
+bool calibrationReadFailed = false;
+unsigned long lastRecoveryMs = 0;
+unsigned long lastImuErrorLogMs = 0;
+ImuHealth imuHealth;
+
+void printImuHealth();
 
 enum HapticPattern {
   HAPTIC_SINGLE_PULSE,
@@ -206,6 +215,7 @@ void pollHapticTestCommand() {
     case '1': triggerHapticPattern(HAPTIC_SINGLE_PULSE); break;
     case '2': triggerHapticPattern(HAPTIC_DOUBLE_PULSE); break;
     case '3': triggerHapticPattern(HAPTIC_FAULT_PATTERN); break;
+    case 'd': printImuHealth(); break;
     default: break;
   }
 }
@@ -231,7 +241,17 @@ void setNodeState(NodeState nextState) {
 }
 
 bool bufferStateIsValid() {
-  return bufferCount >= 0 && bufferCount <= BUFFER_SIZE;
+  return bufferCount >= 0 && bufferCount <= BUFFER_SIZE &&
+      readIndex >= 0 && readIndex < BUFFER_SIZE &&
+      writeIndex >= 0 && writeIndex < BUFFER_SIZE;
+}
+
+void enterFault(const char* reason, bool recoverable = false) {
+  faultReason = reason;
+  runtimeImuFault = recoverable;
+  lastRecoveryMs = millis();
+  Serial.printf("[fault] reason=%s automatic_recovery=%u\n", reason, recoverable);
+  setNodeState(NODE_FAULT);
 }
 
 bool axisIsSaturated(int16_t value) {
@@ -254,14 +274,61 @@ LowPassFilter filterAY;
 LowPassFilter filterAZ;
 
 ICM42686P imu;
-bool imuReadFault = false;
+bool imuReadFault = false;  // Outcome of the latest read, not a permanent latch.
 WiFiTelemetry wifiTelemetry;
+
+void printImuHealth() {
+  const ImuIoError& error = imu.lastError();
+  Serial.printf("[imu-health] state=%s reason=%s seq=%lu failures=%lu consecutive=%lu max_consecutive=%lu attempts=%lu recoveries=%lu saturated=%lu stage=%s reg=0x%02X wire=%u bytes=%u/%u\n",
+      nodeStateName(nodeState), faultReason, (unsigned long)nextSeq,
+      (unsigned long)imuHealth.readFailures, (unsigned long)imuHealth.consecutive,
+      (unsigned long)imuHealth.maxConsecutive, (unsigned long)imuHealth.recoveryAttempts,
+      (unsigned long)imuHealth.recoveries, (unsigned long)imuHealth.saturated,
+      error.stage, error.reg, error.wireStatus,
+      (unsigned)error.received, (unsigned)error.expected);
+}
+
+void resetFilters() {
+  filterGX.reset(); filterGY.reset(); filterGZ.reset();
+  filterAX.reset(); filterAY.reset(); filterAZ.reset();
+}
+
+void recoverRuntimeImu() {
+  if (!runtimeImuFault || millis() - lastRecoveryMs < ImuHealth::RECOVERY_INTERVAL_MS)
+    return;
+  ++imuHealth.recoveryAttempts;
+  // This deliberately pauses acquisition while faulted. Never run calibration
+  // on a moving sensor; retain the valid boot calibration at the same ranges.
+  Wire.end();
+  bool ready = Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN, 400000);
+  Wire.setTimeOut(I2C_TIMEOUT_MS);
+  SensorFrame probe = {};
+  ready = ready && imu.begin(Wire) && imu.readRaw(probe);
+  lastRecoveryMs = millis();
+  if (!ready) {
+    printImuHealth();
+    return;
+  }
+  ++imuHealth.recoveries;
+  imuHealth.succeeded();
+  imuReadFault = false;
+  resetFilters();
+  moveDetector = MoveDetector();
+  runtimeImuFault = false;
+  faultReason = "none";
+  // Keep sequence and capture clocks continuous so the outage remains visible.
+  // Keep nextSampleTime too: the scheduler counts expired outage slots once.
+  setNodeState(NODE_STREAMING);
+  Serial.println("[imu] recovered; retained boot calibration");
+  printImuHealth();
+}
 
 SensorFrame readRealIMU() {
   SensorFrame frame = {};
 
-  if (!imu.readRaw(frame)) {
-    imuReadFault = true;
+  imuReadFault = !imu.readRaw(frame);
+  if (imuReadFault) {
+    if (nodeState == NODE_CALIBRATING) calibrationReadFailed = true;
   } else {
     applyAxisMapping(frame, NODE_AXIS_MAPPING);
   }
@@ -396,7 +463,7 @@ void setup() {
       !wifiTelemetry.begin(WIFI_DEMO_SSID, WIFI_DEMO_PASSWORD,
                            WIFI_LAPTOP_IP, WIFI_DEMO_PORT)) {
     Serial.println("[wifi] begin failed");
-    setNodeState(NODE_FAULT);
+    enterFault("wifi_startup");
     return;
   }
 
@@ -415,17 +482,23 @@ void setup() {
 
   Serial.print("[state] ");
   Serial.println(nodeStateName(nodeState));
-  Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);
+  if (!Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN, 400000)) {
+    enterFault("i2c_startup");
+    return;
+  }
   // One 12-byte read comfortably fits the 5 ms budget at 400 kHz.
   // Measured acquisition intervals, not this setting, establish the achieved rate.
   Wire.setClock(400000);
+  Wire.setTimeOut(I2C_TIMEOUT_MS);
   if (!imu.begin(Wire, ICM42686P::DEFAULT_ADDRESS)) {
     Serial.println("[imu] begin/readback failed");
-    setNodeState(NODE_FAULT);
+    enterFault("imu_startup_readback");
+    printImuHealth();
     return;
   }
   Serial.println("[imu] ready; axis mapping=identity (provisional)");
   setNodeState(NODE_CALIBRATING);
+  Serial.println("Keep sensor flat with +Z upward and still for BOTH calibrations (~4 s)...");
   if (ENABLE_WIFI_TELEMETRY) {
     captureDiagnostics.sendConfiguration(wifiTelemetry, imu.configuration(),
         gyroCalibration, accelCalibration, nodeStateName(nodeState),
@@ -444,14 +517,16 @@ void setup() {
       SAMPLE_DELAY_MS
     );
 
-  if (!bufferStateIsValid() || imuReadFault) {
-    setNodeState(NODE_FAULT);
+  if (!bufferStateIsValid() || calibrationReadFailed) {
+    enterFault(calibrationReadFailed ? "calibration_read_failed" : "buffer_invariant");
+    printImuHealth();
     return;
   }
 
   setNodeState(NODE_STREAMING);
   Serial.printf("[calibration] gyro bias counts=(%.6f,%.6f,%.6f)\n",
       gyroCalibration.biasX, gyroCalibration.biasY, gyroCalibration.biasZ);
+  Serial.println("[imu] send d for health counters; 1/2/3 for haptic patterns");
   if (ENABLE_WIFI_TELEMETRY) {
     captureDiagnostics.sendConfiguration(wifiTelemetry, imu.configuration(),
         gyroCalibration, accelCalibration, nodeStateName(nodeState),
@@ -479,6 +554,7 @@ void setup() {
 // Called only inside an admitted telemetry slot, including while in FAULT.
 // The periodic trigger queues work; it never sends a whole heartbeat at once.
 bool publishCaptureDiagnostics() {
+  captureDiagnostics.recordImuHealth(imuHealth);
   unsigned long reportTime = micros();
   if ((long)(reportTime - nextStatsPrintTime) >= 0) {
     bool includeConfiguration = millis() - lastConfigReportMs >= 5000 || nodeState == NODE_FAULT;
@@ -531,6 +607,7 @@ void loop() {
 
   if (nodeState == NODE_FAULT) {
     serviceTelemetry();
+    recoverRuntimeImu();
     return;
   }
 
@@ -544,7 +621,7 @@ void loop() {
   if ((long)(currentTime - nextSampleTime) >= 0) {
 
     if (!bufferStateIsValid()) {
-      setNodeState(NODE_FAULT);
+      enterFault("buffer_invariant");
       return;
     }
 
@@ -568,9 +645,23 @@ void loop() {
     unsigned long readUs = micros() - readStart;
 
     if (imuReadFault) {
-      setNodeState(NODE_FAULT);
+      captureDiagnostics.recordMissedAcquisition(readUs, latenessUs, skipped);
+      moveDetector.interruptQuietWindow();
+      bool sustained = imuHealth.failed();
+      if (imuHealth.readFailures == 1 || millis() - lastImuErrorLogMs >= 1000 || sustained) {
+        lastImuErrorLogMs = millis();
+        printImuHealth();
+      }
+      if (sustained) {
+        // Close accounting with an explicit interruption, not a fabricated
+        // quiet/end sample. Already queued real samples may still drain.
+        captureDiagnostics.endBurst(wifiTelemetry, true);
+        moveDetector = MoveDetector();
+        enterFault("imu_read_outage", true);
+      }
       return;
     }
+    imuHealth.succeeded();
     frame.node_id = NODE_ID;
     frame.seq = nextSeq++;
     frame.interval_us = captureDiagnostics.recordAcquisition(
@@ -588,7 +679,7 @@ void loop() {
     }
 
     if (!bufferStateIsValid()) {
-      setNodeState(NODE_FAULT);
+      enterFault("buffer_invariant");
       return;
     }
   }
@@ -673,6 +764,7 @@ void loop() {
     if (sampleSaturated) {
       frame.status_flags |= SENSOR_STATUS_SATURATED;
       saturatedSampleCount++;
+      ++imuHealth.saturated;
     }
 
     // -----------------------------

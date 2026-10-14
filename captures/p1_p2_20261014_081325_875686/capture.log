@@ -1,0 +1,27 @@
+[    0.00s] Listening on 0.0.0.0:4210; firmware v3/v4 supported (v4 batches + retry queue)
+[    0.01s] Capture directory: C:\Users\USER\Documents\NUS\Y3S1_mods\CG4002\CG4002_final_project\captures\p1_p2_20261014_081325_875686
+[    0.01s] Operator-reported power: lipo-usb-disconnected. Start/reset the node now and keep it flat and still.
+[   20.14s] [config] Node 1 boot=33ffc80d state=CALIBRATING WHO=0x44 GYRO_CONFIG0=0x27 ACCEL_CONFIG0=0x27 range_readback_verified=True diag_scheduler=staggered_v1
+[   20.24s] [timing] Node 1 boot=33ffc80d state=CALIBRATING; awaiting acquisition intervals
+[   20.24s] [this-capture] offered=0 accepted=0 received=0 final_local_drops=0 accepted_not_received=0 excluded_historical_bursts=[] partial_bursts=[] pending_bursts=[]; Final consistent bursts starting at/after the first observed acquisition boundary; historical and partial bursts excluded.
+[   24.08s] [config] Node 1 boot=33ffc80d state=STREAMING WHO=0x44 GYRO_CONFIG0=0x27 ACCEL_CONFIG0=0x27 range_readback_verified=True diag_scheduler=staggered_v1
+[   24.08s] [calibration] gyro_bias_counts=[5.705, -19.415001, 6.4475] accel_offset_g=[0.122323, -0.273262, -0.038164]
+[   25.05s] [sample] Node 1 burst=1 seq=182 t_us=17100775 dt_us=4995 accel=(-0.007,-0.043,+0.993) g gyro=(-5.52,+11.96,-38.69) dps
+[   25.24s] [timing] Node 1 boot=33ffc80d state=STREAMING acquired=201 rate=200.06 Hz dt[min/mean/max]=4690/4998.4/5059 us within4.5-5.5ms=100.00% skipped_slots=0 buffer_drops=0 max_diagnostic_us=0 imu_read_failures=0 imu_recoveries=0 saturated=0
+[   25.25s] [transport] Node 1 report=1 wifi_status=3 rssi=-19 dBm (0=unavailable) disconnects=1 reason=2 heap=191808 failed[data/control]=0/0 errors[ENOMEM/busy/network/other]=[0, 0, 0, 0] last=none errno=0 at_uptime_ms=0 last_wifi=0 cached_failure_rssi=0 age_ms=0
+[   25.25s] [txqueue] offered=26 accepted=25 pending=1 FINAL_DROPS=0 recovered_samples=0 retry_calls=0 high_water=5/128 oldest_ms=0 max_age_ms=20 drop_causes[overflow/expiry/permanent/cancel]=0/0/0/0
+[   25.25s] [this-capture] offered=0 accepted=0 received=0 final_local_drops=0 accepted_not_received=0 excluded_historical_bursts=[] partial_bursts=[] pending_bursts=['1']; Final consistent bursts starting at/after the first observed acquisition boundary; historical and partial bursts excluded.
+[   25.56s] [sample] Node 1 burst=1 seq=292 t_us=17650830 dt_us=5055 accel=(+0.035,+0.003,+0.951) g gyro=(-15.40,+27.84,-6.17) dps
+[   26.15s] [sample] Node 1 burst=1 seq=397 t_us=18175827 dt_us=5052 accel=(+0.029,+0.024,+1.013) g gyro=(+15.26,-2.16,+1.18) dps
+[   26.67s] [sample] Node 1 burst=1 seq=497 t_us=18675830 dt_us=5055 accel=(-0.050,+0.050,+1.052) g gyro=(-22.59,+16.13,+1.60) dps
+[   26.87s] [burst] Node 1 boot=33ffc80d burst=1 attempted=375 accepted=375 local_fail=0 received_unique=375 accepted_not_received=0 duplicates=0 reordered=0 (boot evidence; may predate this capture)
+[   28.95s] Capture stopped by user.
+[   28.95s] FINAL CAPTURE SUMMARY
+[   28.95s] [timing] Node 1 boot=33ffc80d state=STREAMING acquired=401 rate=200.03 Hz dt[min/mean/max]=4690/4999.2/5093 us within4.5-5.5ms=100.00% skipped_slots=0 buffer_drops=0 max_diagnostic_us=929 imu_read_failures=0 imu_recoveries=0 saturated=0
+[   28.95s] [transport] Node 1 report=2 wifi_status=3 rssi=-31 dBm (0=unavailable) disconnects=1 reason=2 heap=190652 failed[data/control]=0/0 errors[ENOMEM/busy/network/other]=[0, 0, 0, 0] last=none errno=0 at_uptime_ms=0 last_wifi=0 cached_failure_rssi=0 age_ms=0
+[   28.95s] [txqueue] offered=226 accepted=225 pending=1 FINAL_DROPS=0 recovered_samples=0 retry_calls=0 high_water=5/128 oldest_ms=0 max_age_ms=20 drop_causes[overflow/expiry/permanent/cancel]=0/0/0/0
+[   28.96s] [this-capture] offered=375 accepted=375 received=375 final_local_drops=0 accepted_not_received=0 excluded_historical_bursts=[] partial_bursts=[] pending_bursts=[]; Final consistent bursts starting at/after the first observed acquisition boundary; historical and partial bursts excluded.
+[   28.96s] [burst] Node 1 boot=33ffc80d burst=1 attempted=375 accepted=375 local_fail=0 received_unique=375 accepted_not_received=0 duplicates=0 reordered=0
+[   28.96s] [coverage] startup_observed=True range_readback_verified=True unseen_bursts=0 bursts_without_final_summary=[]
+[   28.96s] [gate-idle] mean_corrected_gyro_dps=[-1.191808543956044, 1.206623675824176, -4.085515060439561]
+[   28.96s] Saved samples.csv, diagnostics.jsonl, summary.json, metadata.json and capture.log in C:\Users\USER\Documents\NUS\Y3S1_mods\CG4002\CG4002_final_project\captures\p1_p2_20261014_081325_875686

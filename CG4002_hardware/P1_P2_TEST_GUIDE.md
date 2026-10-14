@@ -1,8 +1,99 @@
 # P1 / P2 hardware capture
 
-> This is the original P1/P2 bring-up guide. For the current v4 queued-transport
-> firmware and its next validation run, use [TRANSPORT_RELIABILITY_TEST_GUIDE.md](TRANSPORT_RELIABILITY_TEST_GUIDE.md).
-> The v3 verification results below are historical, not validation of v4 Wi-Fi delivery.
+## Aggressive-motion fault diagnosis and retest — 2026-10-14
+
+The current firmware uses v4 queued transport. The older v3 results below are
+historical, not validation of this firmware's physical timing or delivery.
+
+The old sketch latched `imuReadFault` after **one** failed I2C read and never
+attempted another read in FAULT. This explains why a transient read failure
+required a restart. Magnitude/saturation and the movement gate did not cause
+FAULT. The original log does not distinguish a failed read from an invalid
+buffer invariant, nor identify the underlying I2C error.
+
+Runtime now discards failed samples and retries at the next 5 ms acquisition
+slot. After 20 consecutive failed reads it reports `reason=imu_read_outage`,
+closes the current burst with `interrupted=true`, and retries bus/IMU startup
+once per second. Streaming resumes only after configuration verification and
+a successful probe read. Boot calibration is retained; filters and the gate
+restart. It never calibrates automatically while moving. Failed startup or
+calibration remains a separately named fault requiring a reset and a stationary
+calibration. I2C uses an explicit 5 ms transaction timeout; this is not a hard
+wall-clock bound on the complete loop. Recovery includes sensor startup delays.
+
+The six-axis LPF (`alpha=0.2`), movement thresholds, 150 ms quiet window,
+200 Hz target, +/-16 g and +/-2000 dps remain unchanged. A missing sample
+interrupts the quiet timer. Saturation remains a data flag (`15` during motion)
+and does not stop acquisition. Rates above the selected ranges clip; recovery
+cannot reconstruct clipped peaks or samples missed during an outage.
+
+### First run: capture the failure details
+
+1. Upload the main sketch with `ENABLE_VERBOSE_SAMPLE_LOG=false`. Keep your
+   current Wi-Fi settings. For an isolated Serial test, optionally set
+   `ENABLE_WIFI_TELEMETRY=false`; restore it for the Wi-Fi test below.
+2. Open Serial Monitor at **115200 baud**. Keep the sensor flat, +Z up and still
+   throughout **both** calibrations (about 4 seconds after Wi-Fi connects).
+3. After STREAMING, send **`d`**. Leave it still for 10 seconds, then perform
+   five gentle and five aggressive shake/rotation bursts, holding still for
+   2–3 seconds between bursts. Send **`d`** again after shaking.
+4. Paste the startup log, every `[fault]`, `[imu-health]`, and recovery line.
+   `failures` counts failed streaming reads; `consecutive` resets on success;
+   `saturated` counts near-range-limit samples. `seq` should keep advancing.
+   Error details retain the **last failed transaction**, even after recovery.
+   `stage=read_data bytes=0/12 wire=0` means the combined read returned no bytes;
+   it does **not** mean that the I2C transfer succeeded. The ESP32 Wire API does
+   not expose the underlying read error via `requestFrom()`; retain any ESP32
+   I2C driver error lines printed nearby. `read_address` and `write` report the
+   available Wire status code. Identity/config mismatch stages report readback
+   failures, rather than a valid sensor sample.
+
+The combined-read behavior and timeout API were checked against the
+[ESP32 core 3.3.11 Wire implementation](https://github.com/espressif/arduino-esp32/blob/3.3.11/libraries/Wire/src/Wire.cpp).
+
+### Second run: verify movement telemetry and timing
+
+Restore `ENABLE_WIFI_TELEMETRY=true`, verify the laptop IP, start this command
+from the hardware folder, then reset the board and repeat the same movements:
+
+```powershell
+python -B diagnostics/wifi_receiver.py --power-source usb --duration 90
+```
+
+The receiver prints IMU failure/recovery/saturation counts with timing reports
+and marks interrupted bursts. Return `capture.log`, `summary.json`, and
+`diagnostics.jsonl`; keep `samples.csv` for axis/filter analysis. The health
+fields are optional additions to v4; old captures remain readable. Acquisition
+timestamps include outage gaps; failed reads are separate from skipped schedule
+slots and Wi-Fi delivery failures. Sample sequences count valid acquisitions.
+UDP batches contain up to five 200 Hz samples, so datagram rate is not sample
+rate. Idle diagnostic heartbeats and queued tail samples may still arrive after
+the movement gate closes.
+
+For battery validation repeat with USB disconnected and
+`--power-source lipo-usb-disconnected` as described below. The supplied
+`wifi_battery_test` sketch only sends a text heartbeat every two seconds; it
+does not acquire IMU samples or test the main sketch's filter/state machine.
+
+Host regression commands (Microsoft C++ Build Tools required for `.cmd` tests):
+
+```powershell
+cmd /c tests\run_imu_tests.cmd
+cmd /c tests\run_tx_queue_tests.cmd
+python -B -m unittest discover -s tests -v
+```
+
+The IMU test executes the actual sketch/driver/filter/gate with fake Wire I/O:
+full-scale positive/negative axes, partial reads, isolated errors, sustained
+outage, failed recovery attempts, successful recovery, and calibration failure.
+These software checks do not validate aggressive motion on the physical board.
+
+Software verification on 2026-10-14: FireBeetle 2 ESP32-E compilation passed
+(931,895 bytes flash; 82,228 bytes global RAM), both C++ test suites passed,
+and all 67 Python receiver regression tests passed. No hardware was flashed
+or measured during these checks.
+
+## Original P1/P2 capture procedure
 
 For a professor-facing browser dashboard using this same firmware and capture
 format, see [LIVE_DEMO_GUIDE.md](LIVE_DEMO_GUIDE.md). It adds readable motion

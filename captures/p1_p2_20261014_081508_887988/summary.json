@@ -1,0 +1,315 @@
+{
+  "protocol": 4,
+  "protocol_versions": [
+    4
+  ],
+  "invalid_packets": 0,
+  "sessions": [
+    {
+      "node": 1,
+      "boot": 489008482,
+      "state": "STREAMING",
+      "protocol_versions": [
+        4
+      ],
+      "observed_startup": true,
+      "configuration": {
+        "v": 4,
+        "type": "config",
+        "node": 1,
+        "boot": 489008482,
+        "produced": 12038,
+        "state": "STREAMING",
+        "verified": true,
+        "who": 68,
+        "gyro_config": 39,
+        "accel_config": 39,
+        "pwr_mgmt": 15,
+        "gyro_fs_dps": 2000,
+        "accel_fs_g": 16,
+        "gyro_lsb_per_dps": 16.4,
+        "accel_lsb_per_g": 2048.0,
+        "period_us": 5000,
+        "diag_scheduler": "staggered_v1",
+        "telemetry_headroom_us": 3500,
+        "calibration_samples": 400,
+        "gyro_bias_counts": [
+          6.8875,
+          -16.4275,
+          6.08
+        ],
+        "accel_offset_g": [
+          -0.900828,
+          -0.31048,
+          -0.778271
+        ],
+        "alpha": 0.2,
+        "gyro_start_dps": 40.0,
+        "gyro_stop_dps": 15.0,
+        "accel_start_g": 0.3,
+        "accel_stop_g": 0.15,
+        "quiet_ms": 150
+      },
+      "range_readback_verified": true,
+      "timing": {
+        "produced": 12430,
+        "interval_count": 12429,
+        "acquisition_span_s": 62.1447,
+        "achieved_hz": 200.00096548860964,
+        "mean_interval_us": 4999.9758629012795,
+        "min_interval_us": 4705,
+        "max_interval_us": 5142,
+        "interval_histogram_us": {
+          "<4000": 0,
+          "4000-4499": 0,
+          "4500-5499": 12429,
+          "5500-5999": 0,
+          "6000-9999": 0,
+          ">=10000": 0
+        },
+        "within_4500_5499_percent": 100.0,
+        "skipped_deadlines": 0,
+        "max_lateness_us": 121,
+        "max_read_us": 681,
+        "max_processing_us": 65,
+        "max_wifi_send_us": 2657,
+        "buffer_drops": 0,
+        "max_diagnostic_service_us": 1001,
+        "buffer_high_water": 1,
+        "diagnostic_send_failures": 0,
+        "idle_samples": 68,
+        "gate_idle_mean_corrected_gyro_dps": [
+          -4.72054369117647,
+          -4.799076705882353,
+          17.011801088235295
+        ],
+        "gate_idle_mean_calibrated_accel_g": [
+          -0.018009955882352942,
+          0.020368867647058825,
+          1.0652228382352942
+        ],
+        "scope": "All completed device acquisitions since boot, through the latest received timing report; includes idle."
+      },
+      "latest_device_counters": {
+        "v": 4,
+        "type": "timing",
+        "node": 1,
+        "boot": 489008482,
+        "state": "STREAMING",
+        "produced": 12430,
+        "intervals": 12429,
+        "sum_dt_us": 62144700,
+        "min_dt_us": 4705,
+        "max_dt_us": 5142,
+        "hist": [
+          0,
+          0,
+          12429,
+          0,
+          0,
+          0
+        ],
+        "skipped_deadlines": 0,
+        "max_late_us": 121,
+        "max_read_us": 681,
+        "max_processing_us": 65,
+        "max_wifi_us": 2657,
+        "max_diag_us": 1001,
+        "dropped": 0,
+        "high_water": 1,
+        "attempted": 12362,
+        "accepted": 12360,
+        "failed": 0,
+        "pending": 2,
+        "diag_failed": 0,
+        "bursts_started": 1,
+        "active_burst": 1,
+        "idle_samples": 68,
+        "imu_read_failures": 0,
+        "imu_consecutive": 0,
+        "imu_max_consecutive": 0,
+        "imu_recovery_attempts": 0,
+        "imu_recoveries": 0,
+        "saturated_samples": 0,
+        "idle_gyro_sum": [
+          -320.996971,
+          -326.337216,
+          1156.802474
+        ],
+        "idle_accel_sum": [
+          -1.224677,
+          1.385083,
+          72.435153
+        ]
+      },
+      "transport": {
+        "v": 4,
+        "type": "transport",
+        "node": 1,
+        "boot": 489008482,
+        "produced": 12434,
+        "report": 62,
+        "backend": "lwip_queued_v2",
+        "time_ms": 78554,
+        "attempted": 2733,
+        "accepted": 2733,
+        "failed": 0,
+        "data_failed": 0,
+        "control_failed": 0,
+        "stages": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "errors": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "last_errno": 0,
+        "last_stage": 0,
+        "last_data": false,
+        "last_ms": 0,
+        "last_bytes": 0,
+        "last_sent": 0,
+        "last_wifi": 0,
+        "last_rssi": 0,
+        "last_rssi_age_ms": 0,
+        "last_heap": 0,
+        "wifi_status": 3,
+        "rssi_dbm": -14,
+        "disconnects": 1,
+        "last_disconnect_reason": 2,
+        "last_disconnect_ms": 9479,
+        "heap_free": 188576,
+        "heap_min": 183232
+      },
+      "txqueue": {
+        "v": 4,
+        "type": "txqueue",
+        "node": 1,
+        "boot": 489008482,
+        "produced": 12437,
+        "report": 62,
+        "offered": 12369,
+        "accepted": 12365,
+        "dropped": 0,
+        "pending": 4,
+        "recovered": 0,
+        "overflow": 0,
+        "expired": 0,
+        "permanent": 0,
+        "cancelled": 0,
+        "calls": 2473,
+        "errors": 0,
+        "retries": 0,
+        "datagrams": 2473,
+        "high_water": 6,
+        "max_age_ms": 25,
+        "oldest_ms": 15,
+        "capacity": 128,
+        "batch_size": 5,
+        "flush_ms": 20,
+        "max_age_limit_ms": 1000,
+        "retry_ms": 10
+      },
+      "capture_delivery": {
+        "sender_attempted": 0,
+        "sender_accepted": 0,
+        "local_send_failures": 0,
+        "received_unique": 0,
+        "accepted_not_received": 0,
+        "not_captured": 0,
+        "received_percent_of_attempted": null,
+        "start_seq": 0,
+        "finalized_burst_ids": [],
+        "historical_burst_ids": [],
+        "partial_burst_ids": [],
+        "pending_burst_ids": [
+          "1"
+        ],
+        "scope": "Final consistent bursts starting at/after the first observed acquisition boundary; historical and partial bursts excluded.",
+        "bursts_started": 1,
+        "unseen_burst_count": 0
+      },
+      "capture_counter_changes": {
+        "produced": 12430,
+        "skipped_deadlines": 0,
+        "dropped": 0,
+        "failed": 0,
+        "diag_failed": 0
+      },
+      "capture_transport_changes": {
+        "attempted": 2733,
+        "accepted": 2733,
+        "failed": 0,
+        "data_failed": 0,
+        "control_failed": 0,
+        "disconnects": 1
+      },
+      "capture_queue_changes": {
+        "offered": 12369,
+        "accepted": 12365,
+        "dropped": 0,
+        "recovered": 0,
+        "overflow": 0,
+        "expired": 0,
+        "permanent": 0,
+        "cancelled": 0,
+        "calls": 2473,
+        "errors": 0,
+        "retries": 0,
+        "datagrams": 2473
+      },
+      "bursts": {
+        "1": {
+          "received_unique": 12435,
+          "duplicates": 0,
+          "reordered": 0,
+          "conflicting_packets": 0,
+          "complete_sender_summary": false,
+          "pending_samples": 4,
+          "gate_closed": false,
+          "interrupted": false,
+          "accepted_not_received": null,
+          "explanation": "No final sender counts yet; delivery is incomplete evidence."
+        }
+      },
+      "finalized_burst_totals": {
+        "sender_attempted": 0,
+        "sender_accepted": 0,
+        "local_send_failures": 0,
+        "received_unique": 0,
+        "accepted_not_received": 0,
+        "scope": "Only bursts with final, consistent sender summaries. Counts can include a partial receiver capture.",
+        "not_captured": 0,
+        "received_percent_of_attempted": null
+      },
+      "unseen_burst_count": 0,
+      "unseen_burst_ids": {
+        "ranges": [],
+        "range_count": 0,
+        "truncated": false
+      },
+      "bursts_without_final_summary": [
+        "1"
+      ]
+    }
+  ],
+  "interpretation": [
+    "Device and laptop clocks are not synchronized; no one-way latency is calculated.",
+    "Timing is completed register-read cadence, not proof that every sensor ODR update is unique/captured.",
+    "A missing final burst summary is incomplete evidence, not zero loss.",
+    "A timeout indicates silence/staleness, not a movement boundary.",
+    "Configuration readback aligns conversion with the selected range; it is not reference-rate calibration.",
+    "Gate-idle averages require the operator to confirm the sensor was stationary."
+  ],
+  "metadata": {
+    "started_utc": "2026-10-14T00:15:08.888478+00:00",
+    "operator_reported_power_source": "lipo-usb-disconnected",
+    "notes": ""
+  },
+  "duration_s": 83.51760240000294
+}

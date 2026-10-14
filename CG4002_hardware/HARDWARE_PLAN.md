@@ -1,5 +1,17 @@
 # Plan: FireBeetle Sensor Node Hardware Build (Sensors + Haptics only)
 
+## Runtime fault recovery update — 2026-10-14
+
+The Phase B/D lifecycle now tolerates isolated runtime IMU read failures instead
+of permanently latching FAULT. Twenty consecutive failed reads enter a named
+recoverable FAULT; once-per-second bus/IMU reinitialization resumes STREAMING
+after register verification and a successful read. Boot calibration is retained;
+invalid startup calibration is never accepted. Saturation remains a status flag,
+not a fault trigger. The six-axis LPF, movement gate, ranges and 200 Hz target
+remain as specified below. Interrupted bursts and missing acquisitions are
+reported explicitly. See the current retest section in `P1_P2_TEST_GUIDE.md`.
+Physical aggressive-motion validation remains pending.
+
 ## P1/P2 implementation update — 2026-09-29
 
 The video follow-ups P1 and P2 now have capture tooling implemented; **new hardware
