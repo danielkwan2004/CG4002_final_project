@@ -31,6 +31,7 @@ class DummySensorNode:
         timestamp = time.monotonic_ns() / 1e6  # timestamp in milliseconds
         return {
             "node": self.node_id,
+            "source": "dummy",
             "sequence": self.seq,
             # dummy source already uses laptop monotonic clock, so no need to adjust for clock offset
             "timestamp": timestamp,

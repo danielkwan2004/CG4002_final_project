@@ -24,7 +24,7 @@ from utilities.logger_setup import format_packet_for_log
 
 # Maximum attempt durations, not fixed startup delays. A successful step returns
 # immediately; the outer connection budget also leaves time for native cleanup.
-BLE_CONNECT_TIMEOUT_SECONDS = 5.0
+BLE_CONNECT_TIMEOUT_SECONDS = 10.0
 BLE_SETUP_TIMEOUT_SECONDS = 5.0
 BLE_CLEANUP_TIMEOUT_SECONDS = 2.0
 
@@ -205,6 +205,8 @@ class BLESensorNode:
             if packet_type == PacketType.HELLO:
                 if raw.get("node_id", self.node_id) != self.node_id:
                     self.logger.error("[BLE] Expected %s, received HELLO from %s", self.node_id, raw.get("node_id"))
+                    self._last_device = None
+                    self.ready.clear()
                     await self.client.disconnect()
                     return
                 self.logger.debug(f"[RECV - HELLO] Received HELLO: {format_packet_for_log(raw)}")

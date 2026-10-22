@@ -28,8 +28,8 @@ from utilities.mqtt_client import MQTTClientWrapper
 
 
 load_dotenv()
-USER_ULTRA96 = os.getenv("USER_ULTRA96")
-PW_ULTRA96 = os.getenv("PW_ULTRA96")
+USER_ULTRA96 = os.getenv("USER_ULTRA96_COMMS")
+PW_ULTRA96 = os.getenv("PW_ULTRA96_COMMS")
 
 parser = argparse.ArgumentParser()
 parser.add_argument("-v", "--verbose", action="store_true")
@@ -38,13 +38,13 @@ args = parser.parse_args()
 logger = get_logger("ultra96", verbose=args.verbose)
 
 client = MQTTClientWrapper(
-    client_id="ultra96",
+    client_id="ultra96_comms",
     port=PORT_TLS,
     transport=TRANSPORT_TLS,
     ca_certs=CA_CERTS_PATH,
     username=USER_ULTRA96,
     password=PW_ULTRA96,
-    lwt_topic="sys/ultra96/status",
+    lwt_topic="sys/ultra96_comms/status",
     lwt_payload="offline",
     logger=logger,
 )
