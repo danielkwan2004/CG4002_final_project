@@ -51,6 +51,12 @@ class Synchroniser:
         self.sensor_seq = 0
         self.single_forearm = 0
         self.single_paddle = 0
+        self.late_forearm = 0
+        self.late_paddle = 0
+        # MQTT sequences describe publication order, not acquisition order.
+        # Once a timestamp has been published, older arrivals cannot be inserted
+        # ahead of it. Keep independent watermarks for stream and dummy data.
+        self.last_published_timestamp = {source: float("-inf") for source in SENSOR_SOURCES.values()}
         self.max_buffer_len = 200   # 1 sec worth of samples at 200Hz
         self.forearm_buffer = {source: deque(maxlen=self.max_buffer_len) for source in SENSOR_SOURCES.values()}
         self.paddle_buffer = {source: deque(maxlen=self.max_buffer_len) for source in SENSOR_SOURCES.values()}
@@ -93,20 +99,49 @@ class Synchroniser:
             await self._match_source(source)
 
     async def _emit(self, forearm, paddle):
+        packet = paired_sensor_packet(forearm, paddle, self.sensor_seq + 1, self.session_id)
+        source = packet["source"]
+        if packet["timestamp"] < self.last_published_timestamp[source]:
+            for node, sample in (("forearm", forearm), ("paddle", paddle)):
+                if sample is not None:
+                    self._record_late(node, sample)
+            return False
         self.sensor_seq += 1
-        await self.output_queue.put(paired_sensor_packet(
-            forearm, paddle, self.sensor_seq, self.session_id))
+        self.last_published_timestamp[source] = packet["timestamp"]
+        await self.output_queue.put(packet)
         if paddle is None:
             self.single_forearm += 1
         elif forearm is None:
             self.single_paddle += 1
+        return True
+
+    def _record_late(self, node, sample):
+        counter = "late_" + node
+        setattr(self, counter, getattr(self, counter) + 1)
+        self.logger.debug(
+            "[SYNC LATE] node=%s source=%s sequence=%s timestamp_ms=%.3f published_ms=%s",
+            node, sample["source"], sample["sequence"], self._ts(sample),
+            self.last_published_timestamp[sample["source"]],
+        )
+
+    def _discard_late_heads(self, source):
+        # Remove stale samples before pairing so they cannot consume a usable
+        # partner. Compare the same rounded milliseconds carried over MQTT.
+        for node, buffer in (("forearm", self.forearm_buffer[source]),
+                             ("paddle", self.paddle_buffer[source])):
+            while buffer and int(round(self._ts(buffer[0]))) < self.last_published_timestamp[source]:
+                self._record_late(node, buffer.popleft())
 
     # Match the oldest available timestamp to the closest sample on the other
     # board. Unmatched older samples are published with the other sensor absent.
     async def _match_source(self, source):
         forearm_buffer = self.forearm_buffer[source]
         paddle_buffer = self.paddle_buffer[source]
+        self._discard_late_heads(source)
         while forearm_buffer and paddle_buffer:
+            self._discard_late_heads(source)
+            if not forearm_buffer or not paddle_buffer:
+                break
             # anchor on whichever side's oldest sample is older
             if self._ts(forearm_buffer[0]) <= self._ts(paddle_buffer[0]):
                 anchor_buffer, search_buffer = forearm_buffer, paddle_buffer
@@ -127,7 +162,8 @@ class Synchroniser:
                 del search_buffer[index]
                 forearm_sample = anchor if anchor_is_forearm else match
                 paddle_sample = match if anchor_is_forearm else anchor
-                await self._emit(forearm_sample, paddle_sample)
+                if not await self._emit(forearm_sample, paddle_sample):
+                    continue
                 self.matched_count += 1
                 if self.matched_count == 1:
                     self.logger.info(
@@ -162,6 +198,8 @@ class Synchroniser:
             "published": self.sensor_seq,
             "single_forearm": self.single_forearm,
             "single_paddle": self.single_paddle,
+            "late_forearm": self.late_forearm,
+            "late_paddle": self.late_paddle,
             "match_rate_percent": (
                 100.0 * paired_samples / total if total else 0.0
             ),
