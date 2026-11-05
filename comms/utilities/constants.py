@@ -15,6 +15,7 @@ TRANSPORT_WSS = "websockets"
 # Shared MQTT routes; the Unity client keeps matching topic strings in C#.
 TOPIC_SENSOR  = "fb/sensor/raw"
 TOPIC_RESULTS = "ultra96/ai/results"
+TOPIC_HANDEDNESS = "phone/handedness"
 TOPIC_HAPTICS = "ultra96/ai/haptics"
 TOPIC_LATENCY_REQUEST = "latency/{device}/req"
 TOPIC_LATENCY_RESPONSE = "latency/{device}/resp"
@@ -56,6 +57,9 @@ class PacketType(IntEnum):
 
     # User-triggered capture; replies use the ordinary sensor batch.
     DUMMY           = 0x0E
+
+    # User-input handedness from visualiser
+    HAND            = 0x0F
 
     # BLE file transfer
     FILE_REQ        = 0x11

@@ -38,7 +38,9 @@ class Synchroniser:
         output_queue,
         logger,
         tolerance_ms=2.5,
-        pairing_timeout_ms=100,
+        pairing_timeout_ms=2000,
+        max_buffer_len=1000,
+        readiness_gate=False,
     ):
         self.forearm_queue = forearm_queue
         self.paddle_queue = paddle_queue
@@ -57,11 +59,53 @@ class Synchroniser:
         # Once a timestamp has been published, older arrivals cannot be inserted
         # ahead of it. Keep independent watermarks for stream and dummy data.
         self.last_published_timestamp = {source: float("-inf") for source in SENSOR_SOURCES.values()}
-        self.max_buffer_len = 200   # 1 sec worth of samples at 200Hz
-        self.forearm_buffer = {source: deque(maxlen=self.max_buffer_len) for source in SENSOR_SOURCES.values()}
-        self.paddle_buffer = {source: deque(maxlen=self.max_buffer_len) for source in SENSOR_SOURCES.values()}
+        if max_buffer_len <= 0:
+            raise ValueError("max_buffer_len must be positive")
+        self.max_buffer_len = max_buffer_len
+        # Never silently evict samples: capacity pressure emits singles below.
+        self.forearm_buffer = {source: deque() for source in SENSOR_SOURCES.values()}
+        self.paddle_buffer = {source: deque() for source in SENSOR_SOURCES.values()}
         self.matched_count = 0
         self.session_id = uuid.uuid4().hex
+        self.active = not readiness_gate
+        self.session_start_ms = float("-inf")
+        self.latest_stream_timestamp = {"forearm": float("-inf"), "paddle": float("-inf")}
+
+    def start_session(self):
+        now_ms = time.monotonic_ns() / 1e6
+        if not all(0 <= now_ms - ts <= 2000
+                   for ts in self.latest_stream_timestamp.values()):
+            return False
+        self._clear_pending()
+        self.session_id = uuid.uuid4().hex
+        self.session_start_ms = now_ms
+        self.sensor_seq = self.matched_count = 0
+        self.single_forearm = self.single_paddle = 0
+        self.late_forearm = self.late_paddle = 0
+        self.last_published_timestamp = {source: float("-inf") for source in SENSOR_SOURCES.values()}
+        self.active = True
+        return True
+
+    def stop_session(self):
+        self.active = False
+        self._clear_pending()
+
+    def _clear_pending(self):
+        for buffers in (self.forearm_buffer, self.paddle_buffer):
+            for buffer in buffers.values():
+                buffer.clear()
+        while not self.output_queue.empty():
+            self.output_queue.get_nowait()
+
+    def _accept_sample(self, node, sample):
+        if sample["source"] == "stream":
+            self.latest_stream_timestamp[node] = self._ts(sample)
+        # The acquisition cutoff also rejects delayed pre-start BLE batches and
+        # samples already held by pending queue.get tasks when Start was pressed.
+        if not self.active or self._ts(sample) < self.session_start_ms:
+            return
+        buffers = self.forearm_buffer if node == "forearm" else self.paddle_buffer
+        buffers[sample["source"]].append(sample)
 
     @staticmethod
     def _ts(sample):
@@ -78,15 +122,16 @@ class Synchroniser:
                 done, _ = await asyncio.wait(
                     (forearm_get, paddle_get),
                     return_when=asyncio.FIRST_COMPLETED,
-                    timeout=self.pairing_timeout,
+                    # Check expiry promptly even when both streams stop.
+                    timeout=min(self.pairing_timeout, 0.1),
                 )
                 if forearm_get in done:
                     sample = dict(forearm_get.result(), _queued_at=time.monotonic())
-                    self.forearm_buffer[sample["source"]].append(sample)
+                    self._accept_sample("forearm", sample)
                     forearm_get = asyncio.create_task(self.forearm_queue.get())
                 if paddle_get in done:
                     sample = dict(paddle_get.result(), _queued_at=time.monotonic())
-                    self.paddle_buffer[sample["source"]].append(sample)
+                    self._accept_sample("paddle", sample)
                     paddle_get = asyncio.create_task(self.paddle_queue.get())
                 await self._match_available()
         finally:
@@ -178,22 +223,28 @@ class Synchroniser:
             else:
                 await self._emit(None, anchor_buffer.popleft())
 
+        # Wait for delayed BLE batches before publishing a single and advancing
+        # the watermark. Matching pairs above still publish immediately.
+        # Capacity pressure flushes explicitly instead of silently losing data.
         # A timer also flushes the final samples when both streams stop.
         now = time.monotonic()
         for buffer, is_forearm in ((forearm_buffer, True), (paddle_buffer, False)):
             while buffer:
                 sample = buffer[0]
-                if now - sample.setdefault("_queued_at", now) < self.pairing_timeout:
+                if (len(buffer) <= self.max_buffer_len
+                        and now - sample.setdefault("_queued_at", now) < self.pairing_timeout):
                     break
                 buffer.popleft()
                 await self._emit(sample if is_forearm else None, None if is_forearm else sample)
 
     def stats(self):
         # Each pair accounts for two sensor samples. Pending samples are
-        # excluded until they are paired or emitted individually.
+        # excluded until resolved; late drops count as unmatched received samples.
         paired_samples = 2 * self.matched_count
-        total = paired_samples + self.single_forearm + self.single_paddle
+        total = (paired_samples + self.single_forearm + self.single_paddle
+                 + self.late_forearm + self.late_paddle)
         return {
+            "active": self.active,
             "matched": self.matched_count,
             "published": self.sensor_seq,
             "single_forearm": self.single_forearm,
@@ -203,8 +254,10 @@ class Synchroniser:
             "match_rate_percent": (
                 100.0 * paired_samples / total if total else 0.0
             ),
-            "received_forearm": self.matched_count + self.single_forearm,
-            "received_paddle": self.matched_count + self.single_paddle,
+            "received_forearm": (self.matched_count + self.single_forearm + self.late_forearm
+                                 + sum(map(len, self.forearm_buffer.values()))),
+            "received_paddle": (self.matched_count + self.single_paddle + self.late_paddle
+                                + sum(map(len, self.paddle_buffer.values()))),
             "forearm_buffer": sum(map(len, self.forearm_buffer.values())),
             "paddle_buffer": sum(map(len, self.paddle_buffer.values())),
         }

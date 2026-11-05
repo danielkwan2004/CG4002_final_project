@@ -15,6 +15,7 @@ from utilities.constants import (
     TRANSPORT_TLS,
     TOPIC_SENSOR,
     TOPIC_HAPTICS,
+    TOPIC_HANDEDNESS,
     CA_CERTS_PATH,
     HAPTIC_MIN_INTERVAL_SECONDS,
 )
@@ -34,9 +35,11 @@ CAPTURE_LEAD_MS = 200
 
 # Paired and single-sensor samples are published. The session and sequence fields let receivers
 # distinguish laptop restarts and trace an AI result back to its final input pair.
-async def publisher_task(output_queue: asyncio.Queue, mqtt_client: MQTTClientWrapper, logger, metrics):
+async def publisher_task(output_queue: asyncio.Queue, mqtt_client: MQTTClientWrapper, logger, metrics, sync):
     while True:
         paired_sample = await output_queue.get()
+        if not sync.active or paired_sample["session_id"] != sync.session_id:
+            continue
         if not mqtt_client.publish(TOPIC_SENSOR, paired_sample, qos=0):
             continue  # Drop live samples while offline; never replay an old stream.
         metrics["mqtt_bytes"] += len(json.dumps(paired_sample).encode())
@@ -90,9 +93,12 @@ def raw_keyboard():
         termios.tcsetattr(fd, termios.TCSADRAIN, previous)
 
 
-async def keyboard_task(nodes, logger):
+async def keyboard_task(nodes, logger, sync=None, mode="keyboard"):
     """Request a one-second burst through the ordinary decoder and publisher."""
-    logger.info("Keyboard ready: printable key = one-second 200 Hz burst/node; Ctrl-C stops")
+    if sync is not None:
+        logger.info("Session paused: press SPACE to start/stop after both sensors deliver fresh data; Ctrl-C exits")
+    if mode in ("keyboard", "both"):
+        logger.info("Printable keys request a one-second capture; SPACE is reserved in both mode")
     loop = asyncio.get_running_loop()
     keys = asyncio.Queue()
     fd = sys.stdin.fileno()
@@ -111,6 +117,20 @@ async def keyboard_task(nodes, logger):
                 data = await keys.get()
                 if not data:
                     return
+                if sync is not None and data == b" ":
+                    if sync.active:
+                        sync.stop_session()
+                        logger.info("Session stopped: %s", sync.stats())
+                    elif not all(node.ready.is_set() and node.client is not None
+                                 and node.client.is_connected for node in nodes):
+                        logger.warning("Start skipped: both FireBeetles must be connected and ready")
+                    elif sync.start_session():
+                        logger.info("Session started: %s", sync.session_id)
+                    else:
+                        logger.warning("Start skipped: both sensors need samples acquired within the last 2 seconds; move both and retry SPACE")
+                    continue
+                if mode == "stream" or (sync is not None and not sync.active):
+                    continue
                 if not 32 <= data[0] <= 126:
                     continue
                 if loop.time() < busy_until:
@@ -158,7 +178,7 @@ async def haptic_worker(haptic_queue: asyncio.Queue, forearm_node: BLESensorNode
         else:
             logger.debug("Dropped haptic command because the forearm write failed")
         
-async def main(verbose: bool, clock_resync: bool, mode: str):
+async def main(verbose: bool, clock_resync: bool, mode: str, readiness_gate: bool = True):
     logger = get_logger("laptop", verbose, log_dir=DEFAULT_LOG_DIR / "laptop")
 
     main_loop = asyncio.get_running_loop()
@@ -173,7 +193,9 @@ async def main(verbose: bool, clock_resync: bool, mode: str):
                                 streaming=mode != "keyboard", connection_lock=connection_lock)
     paddle_node = BLESensorNode("paddle", clock_resync, paddle_queue, logger,
                                 streaming=mode != "keyboard", connection_lock=connection_lock)
-    sync = Synchroniser(forearm_queue, paddle_queue, output_queue, logger)
+    gate_enabled = readiness_gate and mode != "keyboard"
+    sync = Synchroniser(forearm_queue, paddle_queue, output_queue, logger,
+                        readiness_gate=gate_enabled)
 
     mqtt_client = MQTTClientWrapper(
         client_id="laptop_cli",
@@ -212,7 +234,12 @@ async def main(verbose: bool, clock_resync: bool, mode: str):
             # The asyncio loop is already closing.
             logger.debug("Ignored haptic command during shutdown")
 
+    def handle_handedness(msg):
+        payload = json.loads(msg.payload.decode())
+        logger.info(f"[HANDEDNESS]: {payload}")
+
     mqtt_client.subscribe(TOPIC_HAPTICS, callback=handle_haptic_command, qos=1)
+    mqtt_client.subscribe(TOPIC_HANDEDNESS, callback=handle_handedness, qos=1)
     mqtt_client.loop_start()  # Initial connection and retries run in the background.
 
     tasks = [asyncio.create_task(paddle_node.run()), asyncio.create_task(forearm_node.run())]
@@ -222,11 +249,12 @@ async def main(verbose: bool, clock_resync: bool, mode: str):
     metrics = {"mqtt_bytes": 0}
     tasks.extend([
         asyncio.create_task(sync.run()),
-        asyncio.create_task(publisher_task(output_queue, mqtt_client, logger, metrics)),
+        asyncio.create_task(publisher_task(output_queue, mqtt_client, logger, metrics, sync)),
         asyncio.create_task(stream_stats_task((forearm_node, paddle_node), sync, metrics, logger)),
     ])
-    if mode in ("keyboard", "both"):
-        tasks.append(asyncio.create_task(keyboard_task((forearm_node, paddle_node), logger)))
+    if gate_enabled or mode in ("keyboard", "both"):
+        tasks.append(asyncio.create_task(keyboard_task(
+            (forearm_node, paddle_node), logger, sync if gate_enabled else None, mode)))
     try:
         # Shield children so Ctrl-C does not cancel BLE cleanup twice.
         await asyncio.shield(asyncio.gather(*tasks, return_exceptions=True))
@@ -246,14 +274,16 @@ if __name__ == "__main__":
     parser.add_argument("-v", "--verbose", action="store_true")
     parser.add_argument("-c", "--clock-resync", action="store_false", help="Disable clock resync")
     modes = parser.add_mutually_exclusive_group()
-    modes.add_argument("-m", "--mode", choices=("stream", "keyboard", "both"), default="both")
+    modes.add_argument("-m", "--mode", choices=("stream", "keyboard", "both"), default="stream")
     modes.add_argument("-k", "--keyboard", dest="mode", action="store_const",
                        const="keyboard", help="Alias for --mode keyboard")
+    parser.add_argument("--no-readiness-gate", action="store_true",
+                        help="Publish immediately without SPACE start/stop (also permits headless stream mode)")
     args = parser.parse_args()
-    if args.mode in ("keyboard", "both") and (os.name != "posix" or not sys.stdin.isatty()):
-        parser.error("Keyboard modes require an interactive macOS/Linux terminal")
+    if (args.mode in ("keyboard", "both") or not args.no_readiness_gate) and (os.name != "posix" or not sys.stdin.isatty()):
+        parser.error("Readiness gate and keyboard modes require an interactive macOS/Linux terminal; use --no-readiness-gate for headless stream mode")
 
     try:
-        asyncio.run(main(args.verbose, args.clock_resync, args.mode))
+        asyncio.run(main(args.verbose, args.clock_resync, args.mode, not args.no_readiness_gate))
     except KeyboardInterrupt:
         print("\nInterrupted - Shutting down...")

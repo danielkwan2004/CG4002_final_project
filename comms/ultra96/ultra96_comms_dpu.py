@@ -1,24 +1,18 @@
-
 #!/usr/bin/env python3
 
 """
 PickleViz Ultra96 MQTT + FPGA AI Consumer
 
-Runs in:
-    /tmp/comms_venv
-
 Receives:
     Paddle and forearm IMU data through MQTT
 
-Processes:
-    200 complete synchronized IMU pairs
-    12 channels per sample
-
-Sends:
-    [200,12] input to local DPU server
-
-Returns:
-    Predicted stroke + confidence
+Live inference:
+    1. Continuously maintain recent IMU history.
+    2. Detect significant paddle motion.
+    3. Capture one aligned 400-sample window.
+    4. Send [400,12] to the local DPU server.
+    5. Reject low-confidence predictions.
+    6. Publish accepted stroke predictions.
 
 The DPU server runs separately in pynq-venv.
 """
@@ -41,10 +35,9 @@ from dotenv import load_dotenv
 from utilities.constants import (
     PacketType,
     CA_CERTS_PATH,
-    HAPTIC_MIN_INTERVAL_SECONDS,
-    HAPTIC_RESULTS_PER_TRIGGER,
     PORT_TLS,
     SENSOR_SOURCES,
+    TOPIC_HANDEDNESS,
     TOPIC_HAPTICS,
     TOPIC_RESULTS,
     TOPIC_SENSOR,
@@ -65,41 +58,105 @@ USER_ULTRA96 = os.getenv("USER_ULTRA96")
 PW_ULTRA96 = os.getenv("PW_ULTRA96")
 
 parser = argparse.ArgumentParser()
-parser.add_argument("-v", "--verbose", action="store_true")
+parser.add_argument(
+    "-v",
+    "--verbose",
+    action="store_true"
+)
+
 args = parser.parse_args()
 
-logger = get_logger("ultra96", verbose=args.verbose)
+logger = get_logger(
+    "ultra96",
+    verbose=args.verbose
+)
 
-# Existing local PYNQ inference server
+
+# ============================================================
+# DPU SERVER
+# ============================================================
+
 DPU_SOCKET_PATH = "/tmp/pickleviz_dpu.sock"
+
 DPU_TIMEOUT_SECONDS = 5.0
+
 MAX_RESPONSE_BYTES = 65536
 
-# CNN input
-SAMPLES_PER_STROKE = 200
+
+# ============================================================
+# CNN INPUT
+# ============================================================
+
+SAMPLES_PER_STROKE = 400
+
 IMU_CHANNELS = 12
 
-# One sample = six paddle + six forearm channels
+
+# ============================================================
+# CONFIDENCE FILTER
+# ============================================================
+
+MIN_CONFIDENCE = 0.70
+
+
+# ============================================================
+# MOTION-TRIGGERED WINDOWING
+# ============================================================
+
+# Number of recent samples retained before motion detection.
+PRE_TRIGGER_SAMPLES = 100
+
+POST_TRIGGER_SAMPLES = (
+    SAMPLES_PER_STROKE
+    - PRE_TRIGGER_SAMPLES
+)
+
+# Initial motion threshold.
+#
+# Fresh stroke recordings showed volley gyro peaks around
+# roughly 200-326 while full strokes were often much higher.
+#
+# 100 is therefore a conservative starting trigger.
+#
+# Tune this later using actual idle measurements.
+GYRO_TRIGGER_THRESHOLD = 100.0
+
+# Require several consecutive samples above the threshold.
+TRIGGER_CONFIRM_SAMPLES = 3
+
+# Prevent one physical stroke from immediately triggering
+# another classification.
+STROKE_COOLDOWN_SECONDS = 1.0
+
+
+# ============================================================
+# CLASSES
+# ============================================================
+
 CLASSES = [
     "forehand",
     "backhand",
-    "overhead_stroke",
-    "overhead_smash",
-    "underhand_short_arch",
-    "underhand_long_arch",
+    "overhead",
+    "underhand",
+    "forehand_volley",
+    "backhand_volley",
 ]
 
-# Maximum queued windows awaiting DPU inference
+
+# ============================================================
+# QUEUE / SENSOR TIMING
+# ============================================================
+
 MAX_PENDING_WINDOWS = 20
 
-# Optional acquisition gap check.
-# Set after confirming actual sensor sampling rate.
-MAX_SAMPLE_GAP_MS = None
+# Same basic timing protection used during training capture.
+MAX_SAMPLE_GAP_MS = 20
 
-# Resolve the CA certificate relative to /,
-# matching the existing communications installation.
-#
-# Confirm that /comms/ca.crt exists.
+
+# ============================================================
+# TLS
+# ============================================================
+
 CA_CERTIFICATE = "/comms/ca.crt"
 
 
@@ -125,76 +182,125 @@ client = MQTTClientWrapper(
 # ============================================================
 
 result_seq = 0
+
 result_session_id = uuid.uuid4().hex
+
 result_lock = threading.Lock()
 
 haptic_seq = 0
-results_since_haptic = 0
-last_haptic_time = float("-inf")
 
 
 # ============================================================
 # SENSOR BUFFER STATE
 # ============================================================
 
-sensor_sources = tuple(SENSOR_SOURCES.values())
+sensor_sources = tuple(
+    SENSOR_SOURCES.values()
+)
 
+
+# Rolling pre-trigger history.
 sensor_buffers = {
     source: deque()
     for source in sensor_sources
 }
 
+
+# Number of consecutive samples above motion threshold.
+motion_counts = {
+    source: 0
+    for source in sensor_sources
+}
+
+
+# Active triggered capture.
+#
+# None:
+#     no stroke currently being captured
+#
+# dict:
+#     {"pairs": [...]}
+capture_states = {
+    source: None
+    for source in sensor_sources
+}
+
+
+# Last completed stroke time for cooldown.
+last_stroke_times = {
+    source: float("-inf")
+    for source in sensor_sources
+}
+
+
+# MQTT sensor session state.
 sensor_sessions = {
     source: None
     for source in sensor_sources
 }
+
 
 sensor_last_seq = {
     source: None
     for source in sensor_sources
 }
 
+
 sensor_last_timestamp = {
     source: None
     for source in sensor_sources
 }
 
+
 sensor_changed = threading.Condition()
 
+
+# Completed stroke windows waiting for inference.
 pending_windows = deque()
 
 
 # ============================================================
-# DECODE ACTUAL MQTT IMU FORMAT
+# IMU DECODING
 # ============================================================
 
 def decode_imu(imu):
     """
-    Real MQTT IMU format:
+    Decode one IMU.
+
+    Expected format:
 
     {
         "acceleration": {
-            "x": 0.1,
-            "y": 0.2,
-            "z": 9.8
+            "x": ...,
+            "y": ...,
+            "z": ...
         },
         "gyroscope": {
-            "x": 0.3,
-            "y": 0.4,
-            "z": 0.5
+            "x": ...,
+            "y": ...,
+            "z": ...
         }
     }
 
     Returns:
+
         [ax, ay, az, gx, gy, gz]
     """
 
     if not isinstance(imu, dict):
-        raise ValueError("Missing IMU data")
+        raise ValueError(
+            "Missing IMU data"
+        )
 
     try:
-        acceleration = imu["acceleration"]
-        gyroscope = imu["gyroscope"]
+
+        acceleration = imu[
+            "acceleration"
+        ]
+
+        gyroscope = imu[
+            "gyroscope"
+        ]
 
         values = [
             acceleration["x"],
@@ -206,81 +312,157 @@ def decode_imu(imu):
         ]
 
     except (KeyError, TypeError) as exc:
+
         raise ValueError(
             "Invalid acceleration/gyroscope format"
         ) from exc
 
+
     if any(
         isinstance(value, bool)
-        or not isinstance(value, (int, float))
+        or not isinstance(
+            value,
+            (int, float)
+        )
         for value in values
     ):
+
         raise ValueError(
             "Non-numeric IMU measurement"
         )
 
-    values = [float(v) for v in values]
 
-    if not all(math.isfinite(v) for v in values):
+    values = [
+        float(value)
+        for value in values
+    ]
+
+
+    if not all(
+        math.isfinite(value)
+        for value in values
+    ):
+
         raise ValueError(
             "Non-finite IMU measurement"
         )
+
 
     return values
 
 
 # ============================================================
-# VALIDATE COMPLETE SENSOR PAIR
+# COMPLETE SENSOR PAIR
 # ============================================================
 
 def decode_sensor_pair(packet):
-    paddle_data = packet.get("paddle")
-    forearm_data = packet.get("forearm")
+    """
+    Return exactly 12 channels:
 
-    if paddle_data is None and forearm_data is None:
-        raise ValueError("Both IMUs unavailable")
+        paddle:
+            ax ay az gx gy gz
 
-    paddle = (
-        decode_imu(paddle_data)
-        if paddle_data is not None
-        else [0.0] * 6
+        forearm:
+            ax ay az gx gy gz
+
+    Both IMUs are required because the CNN was trained using
+    complete paddle + forearm samples.
+    """
+
+    if packet.get("paddle") is None:
+
+        raise ValueError(
+            "Missing paddle IMU"
+        )
+
+
+    if packet.get("forearm") is None:
+
+        raise ValueError(
+            "Missing forearm IMU"
+        )
+
+
+    paddle = decode_imu(
+        packet["paddle"]
     )
 
-    forearm = (
-        decode_imu(forearm_data)
-        if forearm_data is not None
-        else [0.0] * 6
+    forearm = decode_imu(
+        packet["forearm"]
     )
+
 
     return paddle + forearm
 
 
+# ============================================================
+# MOTION MAGNITUDE
+# ============================================================
+
+def paddle_gyro_magnitude(packet):
+    """
+    Calculate paddle gyroscope magnitude.
+
+    sqrt(gx^2 + gy^2 + gz^2)
+    """
+
+    paddle = decode_imu(
+        packet["paddle"]
+    )
+
+    gx = paddle[3]
+    gy = paddle[4]
+    gz = paddle[5]
+
+
+    return math.sqrt(
+        gx * gx
+        + gy * gy
+        + gz * gz
+    )
+
 
 # ============================================================
-# CONVERT BUFFER INTO CNN WINDOW
+# PREPARE CNN WINDOW
 # ============================================================
 
 def prepare_imu_window(pairs):
+    """
+    Convert 400 synchronized MQTT packets into:
+
+        [400,12]
+
+    The channel order is identical to training.
+    """
 
     if len(pairs) != SAMPLES_PER_STROKE:
+
         raise ValueError(
-            f"Expected 200 samples, received {len(pairs)}"
+            f"Expected "
+            f"{SAMPLES_PER_STROKE} samples, "
+            f"received {len(pairs)}"
         )
+
 
     ordered = sorted(
         pairs,
-        key=lambda packet: packet["sensor_seq"]
+        key=lambda packet:
+            packet["sensor_seq"]
     )
+
 
     session_ids = {
         packet["session_id"]
         for packet in ordered
     }
 
+
     if len(session_ids) != 1:
+
         raise ValueError(
             "Mixed sensor sessions"
         )
+
 
     for previous, current in zip(
         ordered,
@@ -291,51 +473,64 @@ def prepare_imu_window(pairs):
             current["sensor_seq"]
             <= previous["sensor_seq"]
         ):
+
             raise ValueError(
-                "Duplicate or out-of-order sensor sequence"
+                "Duplicate or out-of-order "
+                "sensor sequence"
             )
+
 
         if (
             current["timestamp"]
             < previous["timestamp"]
         ):
+
             raise ValueError(
                 "Non-monotonic sensor timestamps"
             )
+
 
     samples = [
         decode_sensor_pair(packet)
         for packet in ordered
     ]
 
+
     return samples
 
 
 # ============================================================
-# SEND DATA TO DPU SERVER
+# DPU REQUEST
 # ============================================================
 
 def request_dpu_prediction(samples):
     """
-    Send [200,12] samples to:
-        /tmp/pickleviz_dpu.sock
+    Send [400,12] samples to the local DPU server.
 
     Returns:
+
         stroke, confidence
     """
 
     if len(samples) != SAMPLES_PER_STROKE:
+
         raise ValueError(
             "Incorrect CNN input length"
         )
+
 
     request = {
         "samples": samples
     }
 
+
     payload = (
-        json.dumps(request) + "\n"
-    ).encode("utf-8")
+        json.dumps(request)
+        + "\n"
+    ).encode(
+        "utf-8"
+    )
+
 
     with socket.socket(
         socket.AF_UNIX,
@@ -346,40 +541,70 @@ def request_dpu_prediction(samples):
             DPU_TIMEOUT_SECONDS
         )
 
+
         connection.connect(
             DPU_SOCKET_PATH
         )
 
-        connection.sendall(payload)
+
+        connection.sendall(
+            payload
+        )
+
 
         response = bytearray()
 
-        while not response.endswith(b"\n"):
 
-            chunk = connection.recv(4096)
+        while not response.endswith(
+            b"\n"
+        ):
+
+            chunk = connection.recv(
+                4096
+            )
+
 
             if not chunk:
+
                 raise RuntimeError(
                     "DPU server disconnected"
                 )
 
-            response.extend(chunk)
 
-            if len(response) > MAX_RESPONSE_BYTES:
+            response.extend(
+                chunk
+            )
+
+
+            if (
+                len(response)
+                > MAX_RESPONSE_BYTES
+            ):
+
                 raise RuntimeError(
                     "DPU response too large"
                 )
 
+
     result = json.loads(
-        response.decode("utf-8")
+        response.decode(
+            "utf-8"
+        )
     )
 
-    if not isinstance(result, dict):
+
+    if not isinstance(
+        result,
+        dict
+    ):
+
         raise RuntimeError(
             "Invalid DPU response"
         )
 
+
     if not result.get("ok"):
+
         raise RuntimeError(
             result.get(
                 "error",
@@ -387,23 +612,43 @@ def request_dpu_prediction(samples):
             )
         )
 
-    stroke = result["stroke"]
-    confidence = float(result["confidence"])
+
+    stroke = result[
+        "stroke"
+    ]
+
+    confidence = float(
+        result["confidence"]
+    )
+
 
     if stroke not in CLASSES:
+
         raise ValueError(
-            f"Unknown predicted stroke: {stroke}"
+            f"Unknown predicted stroke: "
+            f"{stroke}"
         )
 
-    if not math.isfinite(confidence):
+
+    if not math.isfinite(
+        confidence
+    ):
+
         raise ValueError(
             "Invalid confidence"
         )
 
-    if not 0.0 <= confidence <= 1.0:
+
+    if not (
+        0.0
+        <= confidence
+        <= 1.0
+    ):
+
         raise ValueError(
             "Confidence outside valid range"
         )
+
 
     return stroke, confidence
 
@@ -412,66 +657,103 @@ def request_dpu_prediction(samples):
 # PUBLISH AI RESULT
 # ============================================================
 
-def publish_ai_result(stroke, confidence, pairs):
-    """
-    Preserve the original communications result schema.
-    """
+def publish_ai_result(
+    stroke,
+    confidence,
+    pairs
+):
 
     global result_seq
-    global results_since_haptic
     global haptic_seq
-    global last_haptic_time
 
-    source = pairs[-1]["source"]
-    sensor_seq = pairs[-1]["sensor_seq"]
-    sensor_session_id = pairs[-1]["session_id"]
+
+    source = pairs[-1][
+        "source"
+    ]
+
+    sensor_seq = pairs[-1][
+        "sensor_seq"
+    ]
+
+    sensor_session_id = pairs[-1][
+        "session_id"
+    ]
+
 
     with result_lock:
 
         result_seq += 1
 
+
         result = {
-            "type": PacketType.AI_RESULTS,
-            "source": source,
-            "timestamp": (
-                time.monotonic_ns() // 1_000_000
-            ),
-            "session_id": result_session_id,
-            "sensor_session_id": sensor_session_id,
-            "result_seq": result_seq,
-            "sensor_seq": sensor_seq,
-            "stroke": stroke,
-            "confidence": confidence,
+            "type":
+                PacketType.AI_RESULTS,
+
+            "source":
+                source,
+
+            "timestamp":
+                time.monotonic_ns()
+                // 1_000_000,
+
+            "session_id":
+                result_session_id,
+
+            "sensor_session_id":
+                sensor_session_id,
+
+            "result_seq":
+                result_seq,
+
+            "sensor_seq":
+                sensor_seq,
+
+            "stroke":
+                stroke,
+
+            "confidence":
+                confidence,
 
             "sensor_sample_counts": {
                 name: sum(
-                    packet.get(name) is not None
+                    packet.get(name)
+                    is not None
                     for packet in pairs
                 )
-                for name in ("forearm", "paddle")
+                for name in (
+                    "forearm",
+                    "paddle"
+                )
             },
 
             "complete_pairs": sum(
-                packet.get("forearm") is not None
-                and packet.get("paddle") is not None
+                packet.get("forearm")
+                is not None
+                and packet.get("paddle")
+                is not None
                 for packet in pairs
             ),
         }
+
 
         if not client.publish(
             TOPIC_RESULTS,
             result,
             qos=1
         ):
+
             logger.info(
-                "Dropped AI result while MQTT unavailable"
+                "Dropped AI result while "
+                "MQTT unavailable"
             )
+
             return
+
 
         logger.info(
             "Published AI result #%d: "
-            "source=%s seq=%d stroke=%s "
-            "confidence=%.4f",
+            "source=%s seq=%d "
+            "stroke=%s confidence=%.4f",
             result_seq,
             source,
             sensor_seq,
@@ -479,114 +761,272 @@ def publish_ai_result(stroke, confidence, pairs):
             confidence
         )
 
-        # Dummy source never triggers haptics.
-        if source == "dummy":
+
+        # Publish one haptic command for every successfully published AI result.
+        next_haptic_seq = haptic_seq + 1
+        haptic = {
+            "type": PacketType.HAPTIC_CMD,
+            "timestamp": time.monotonic_ns() // 1_000_000,
+            "session_id": result_session_id,
+            "sensor_session_id": sensor_session_id,
+            "haptic_seq": next_haptic_seq,
+            "result_seq": result_seq,
+            "sensor_seq": sensor_seq,
+            "pattern": "double",
+        }
+
+        if not client.publish(TOPIC_HAPTICS, haptic, qos=1):
+            logger.info("Dropped haptic command while MQTT unavailable")
             return
 
-        results_since_haptic += 1
-        now = time.monotonic()
-
-        if (
-            results_since_haptic >= HAPTIC_RESULTS_PER_TRIGGER
-            and now - last_haptic_time
-            >= HAPTIC_MIN_INTERVAL_SECONDS
-        ):
-
-            next_haptic_seq = haptic_seq + 1
-
-            published = client.publish(
-                TOPIC_HAPTICS,
-                {
-                    "type": PacketType.HAPTIC_CMD,
-                    "timestamp": (
-                        time.monotonic_ns() // 1_000_000
-                    ),
-                    "session_id": result_session_id,
-                    "sensor_session_id": sensor_session_id,
-                    "haptic_seq": next_haptic_seq,
-                    "result_seq": result_seq,
-                    "sensor_seq": sensor_seq,
-                    "pattern": "double_pulse",
-                },
-                qos=1
-            )
-
-            if published:
-                haptic_seq = next_haptic_seq
-                results_since_haptic = 0
-                last_haptic_time = now
+        haptic_seq = next_haptic_seq
+        logger.info(
+            "Published haptic #%d: result_seq=%d sensor_seq=%d",
+            haptic_seq,
+            result_seq,
+            sensor_seq,
+        )
 
 
 # ============================================================
-# MQTT SENSOR CALLBACK
+# HANDEDNESS CALLBACK
+# ============================================================
+
+def handle_handedness(msg):
+    """
+    Handedness is product/session metadata.
+
+    It is NOT an input to the current StrokeCNN.
+    """
+
+    try:
+
+        handedness = json.loads(
+            msg.payload.decode(
+                "utf-8"
+            )
+        )
+
+    except (
+        ValueError,
+        UnicodeDecodeError
+    ):
+
+        logger.warning(
+            "Ignoring malformed MQTT "
+            "handedness packet"
+        )
+
+        return
+
+
+    if (
+        not isinstance(
+            handedness,
+            dict
+        )
+        or handedness.get(
+            "handedness"
+        )
+        not in (
+            "left",
+            "right"
+        )
+    ):
+
+        logger.warning(
+            "Ignoring invalid MQTT "
+            "handedness packet"
+        )
+
+        return
+
+
+    logger.info(
+        "Received handedness: %s",
+        handedness["handedness"]
+    )
+
+
+# ============================================================
+# SENSOR CALLBACK
 # ============================================================
 
 def handle_sensor_data(msg):
 
     try:
+
         sensor = json.loads(
-            msg.payload.decode("utf-8")
+            msg.payload.decode(
+                "utf-8"
+            )
         )
 
-    except (ValueError, UnicodeDecodeError):
+    except (
+        ValueError,
+        UnicodeDecodeError
+    ):
+
         logger.warning(
-            "Ignoring malformed MQTT sensor packet"
+            "Ignoring malformed MQTT "
+            "sensor packet"
         )
+
         return
+
+
+    # --------------------------------------------------------
+    # Validate packet metadata
+    # --------------------------------------------------------
 
     if (
-        not isinstance(sensor, dict)
-        or sensor.get("type") != PacketType.SENSOR_DATA
-        or sensor.get("source") not in sensor_sources
-        or not isinstance(sensor.get("session_id"), str)
-        or not sensor["session_id"]
-        or type(sensor.get("sensor_seq")) is not int
-        or sensor["sensor_seq"] < 1
-        or type(sensor.get("timestamp")) is not int
-    ):
-        logger.warning(
-            "Ignoring invalid MQTT sensor packet"
+        not isinstance(
+            sensor,
+            dict
         )
+
+        or sensor.get("type")
+        != PacketType.SENSOR_DATA
+
+        or sensor.get("source")
+        not in sensor_sources
+
+        or not isinstance(
+            sensor.get("session_id"),
+            str
+        )
+
+        or not sensor[
+            "session_id"
+        ]
+
+        or type(
+            sensor.get("sensor_seq")
+        ) is not int
+
+        or sensor[
+            "sensor_seq"
+        ] < 1
+
+        or type(
+            sensor.get("timestamp")
+        ) is not int
+    ):
+
+        logger.warning(
+            "Ignoring invalid MQTT "
+            "sensor packet"
+        )
+
         return
 
-    source = sensor["source"]
-    session_id = sensor["session_id"]
-    sequence = sensor["sensor_seq"]
-    timestamp = sensor["timestamp"]
 
-    # Accept packets with at least one valid IMU.
-    # Missing sensor channels are zero-filled.
+    source = sensor[
+        "source"
+    ]
+
+    session_id = sensor[
+        "session_id"
+    ]
+
+    sequence = sensor[
+        "sensor_seq"
+    ]
+
+    timestamp = sensor[
+        "timestamp"
+    ]
+
+
+    # --------------------------------------------------------
+    # Require BOTH IMUs
+    # --------------------------------------------------------
 
     try:
-        decode_sensor_pair(sensor)
+
+        decode_sensor_pair(
+            sensor
+        )
 
     except ValueError as exc:
+
         logger.debug(
             "Incomplete %s sensor pair: %s",
             source,
             exc
         )
+
         return
+
+
+    # --------------------------------------------------------
+    # Protect shared state
+    # --------------------------------------------------------
 
     with sensor_changed:
 
-        # Independent stream/dummy sessions
-        if sensor_sessions[source] != session_id:
+        # ====================================================
+        # NEW SENSOR SESSION
+        # ====================================================
 
-            sensor_buffers[source].clear()
+        if (
+            sensor_sessions[source]
+            != session_id
+        ):
 
-            sensor_last_seq[source] = None
-            sensor_last_timestamp[source] = None
+            sensor_buffers[
+                source
+            ].clear()
 
-            sensor_sessions[source] = session_id
 
+            sensor_last_seq[
+                source
+            ] = None
+
+
+            sensor_last_timestamp[
+                source
+            ] = None
+
+
+            motion_counts[
+                source
+            ] = 0
+
+
+            capture_states[
+                source
+            ] = None
+
+
+            last_stroke_times[
+                source
+            ] = float(
+                "-inf"
+            )
+
+
+            sensor_sessions[
+                source
+            ] = session_id
+
+
+            # Remove pending windows from
+            # the previous session.
             retained = [
-                item for item in pending_windows
+                item
+                for item
+                in pending_windows
                 if item[0] != source
             ]
 
+
             pending_windows.clear()
-            pending_windows.extend(retained)
+
+            pending_windows.extend(
+                retained
+            )
+
 
             logger.info(
                 "New %s sensor session: %s",
@@ -594,88 +1034,363 @@ def handle_sensor_data(msg):
                 session_id
             )
 
-        previous_seq = sensor_last_seq[source]
-        previous_timestamp = (
-            sensor_last_timestamp[source]
+
+        previous_seq = (
+            sensor_last_seq[
+                source
+            ]
         )
+
+        previous_timestamp = (
+            sensor_last_timestamp[
+                source
+            ]
+        )
+
+
+        # ====================================================
+        # SEQUENCE / TIMESTAMP CHECKS
+        # ====================================================
 
         if previous_seq is not None:
 
-            if sequence <= previous_seq:
+            if (
+                sequence
+                <= previous_seq
+            ):
+
                 logger.debug(
-                    "Discarding duplicate/out-of-order packet"
+                    "Discarding duplicate/"
+                    "out-of-order packet"
                 )
+
                 return
 
-            if sequence != previous_seq + 1:
+
+            if (
+                sequence
+                != previous_seq + 1
+            ):
 
                 logger.warning(
-                    "Sequence gap for %s: %d -> %d",
+                    "Sequence gap for %s: "
+                    "%d -> %d",
                     source,
                     previous_seq,
                     sequence
                 )
 
-            if timestamp < previous_timestamp:
+
+                sensor_buffers[
+                    source
+                ].clear()
+
+
+                capture_states[
+                    source
+                ] = None
+
+
+                motion_counts[
+                    source
+                ] = 0
+
+
+            if (
+                timestamp
+                < previous_timestamp
+            ):
 
                 logger.warning(
                     "Timestamp moved backwards"
                 )
 
-                sensor_buffers[source].clear()
+
+                sensor_buffers[
+                    source
+                ].clear()
+
+
+                capture_states[
+                    source
+                ] = None
+
+
+                motion_counts[
+                    source
+                ] = 0
+
 
             elif (
-                MAX_SAMPLE_GAP_MS is not None
-                and timestamp - previous_timestamp
-                > MAX_SAMPLE_GAP_MS
+                MAX_SAMPLE_GAP_MS
+                is not None
+
+                and (
+                    timestamp
+                    - previous_timestamp
+                    > MAX_SAMPLE_GAP_MS
+                )
             ):
 
                 logger.warning(
                     "Large acquisition gap"
                 )
 
-                sensor_buffers[source].clear()
 
-        sensor_last_seq[source] = sequence
-        sensor_last_timestamp[source] = timestamp
+                sensor_buffers[
+                    source
+                ].clear()
 
-        buffer = sensor_buffers[source]
-        buffer.append(sensor)
 
-        if len(buffer) >= SAMPLES_PER_STROKE:
+                capture_states[
+                    source
+                ] = None
 
-            pairs = [
-                buffer.popleft()
-                for _ in range(SAMPLES_PER_STROKE)
-            ]
 
-            if len(pending_windows) >= MAX_PENDING_WINDOWS:
+                motion_counts[
+                    source
+                ] = 0
 
-                logger.warning(
-                    "Inference queue full; "
-                    "dropping oldest window"
+
+        sensor_last_seq[
+            source
+        ] = sequence
+
+
+        sensor_last_timestamp[
+            source
+        ] = timestamp
+
+
+        # ====================================================
+        # ACTIVE STROKE CAPTURE
+        # ====================================================
+
+        capture = capture_states[
+            source
+        ]
+
+
+        if capture is not None:
+
+            capture[
+                "pairs"
+            ].append(
+                sensor
+            )
+
+
+            if (
+                len(
+                    capture[
+                        "pairs"
+                    ]
+                )
+                >= SAMPLES_PER_STROKE
+            ):
+
+                pairs = (
+                    capture[
+                        "pairs"
+                    ][
+                        :SAMPLES_PER_STROKE
+                    ]
                 )
 
-                pending_windows.popleft()
 
-            pending_windows.append(
-                (
-                    source,
-                    session_id,
-                    pairs
+                capture_states[
+                    source
+                ] = None
+
+
+                motion_counts[
+                    source
+                ] = 0
+
+
+                last_stroke_times[
+                    source
+                ] = time.monotonic()
+
+
+                sensor_buffers[
+                    source
+                ].clear()
+
+
+                # Queue overflow protection.
+                if (
+                    len(
+                        pending_windows
+                    )
+                    >= MAX_PENDING_WINDOWS
+                ):
+
+                    logger.warning(
+                        "Inference queue full; "
+                        "dropping oldest window"
+                    )
+
+                    pending_windows.popleft()
+
+
+                pending_windows.append(
+                    (
+                        source,
+                        session_id,
+                        pairs
+                    )
+                )
+
+
+                logger.info(
+                    "Captured motion-triggered "
+                    "%d-sample stroke window",
+                    SAMPLES_PER_STROKE
+                )
+
+
+                sensor_changed.notify()
+
+
+            return
+
+
+        # ====================================================
+        # PRE-TRIGGER ROLLING HISTORY
+        # ====================================================
+
+        buffer = sensor_buffers[
+            source
+        ]
+
+
+        buffer.append(
+            sensor
+        )
+
+
+        while (
+            len(buffer)
+            > PRE_TRIGGER_SAMPLES
+        ):
+
+            buffer.popleft()
+
+
+        # ====================================================
+        # COOLDOWN
+        # ====================================================
+
+        if (
+            time.monotonic()
+            - last_stroke_times[
+                source
+            ]
+            < STROKE_COOLDOWN_SECONDS
+        ):
+
+            motion_counts[
+                source
+            ] = 0
+
+            return
+
+
+        # ====================================================
+        # MOTION DETECTION
+        # ====================================================
+
+        try:
+
+            gyro_mag = (
+                paddle_gyro_magnitude(
+                    sensor
                 )
             )
 
-            sensor_changed.notify()
+        except (
+            ValueError,
+            KeyError
+        ):
+
+            motion_counts[
+                source
+            ] = 0
+
+            return
+
+
+        if (
+            gyro_mag
+            >= GYRO_TRIGGER_THRESHOLD
+        ):
+
+            motion_counts[
+                source
+            ] += 1
+
+        else:
+
+            motion_counts[
+                source
+            ] = 0
+
+
+        # ====================================================
+        # START A NEW STROKE CAPTURE
+        # ====================================================
+
+        if (
+            motion_counts[
+                source
+            ]
+            >= TRIGGER_CONFIRM_SAMPLES
+        ):
+
+            pre_samples = list(
+                buffer
+            )[
+                -PRE_TRIGGER_SAMPLES:
+            ]
+
+
+            capture_states[
+                source
+            ] = {
+                "pairs":
+                    pre_samples
+            }
+
+
+            logger.info(
+                "Stroke motion detected: "
+                "gyro=%.2f "
+                "pre_samples=%d",
+                gyro_mag,
+                len(
+                    pre_samples
+                )
+            )
+
+
+            motion_counts[
+                source
+            ] = 0
 
 
 # ============================================================
-# PROCESS ONE WINDOW
+# PROCESS ONE COMPLETED STROKE WINDOW
 # ============================================================
 
-def process_sensor_window(pairs):
+def process_sensor_window(
+    pairs
+):
 
-    source = pairs[-1]["source"]
+    source = pairs[-1][
+        "source"
+    ]
+
 
     try:
 
@@ -683,27 +1398,62 @@ def process_sensor_window(pairs):
             pairs
         )
 
+
         logger.info(
-            "Sending %d x %d IMU window to DPU",
+            "Sending %d x %d "
+            "IMU window to DPU",
             len(samples),
             IMU_CHANNELS
         )
 
-        stroke, confidence = request_dpu_prediction(
-            samples
+
+        stroke, confidence = (
+            request_dpu_prediction(
+                samples
+            )
         )
 
+
         logger.info(
-            "DPU prediction: %s confidence=%.4f",
+            "DPU prediction: "
+            "%s confidence=%.4f",
             stroke,
             confidence
         )
+
+
+        # ----------------------------------------------------
+        # CONFIDENCE REJECTION
+        # ----------------------------------------------------
+
+        if (
+            confidence
+            < MIN_CONFIDENCE
+        ):
+
+            logger.info(
+                "Rejected low-confidence "
+                "prediction: "
+                "%s confidence=%.4f "
+                "threshold=%.2f",
+                stroke,
+                confidence,
+                MIN_CONFIDENCE
+            )
+
+            return
+
+
+        # ----------------------------------------------------
+        # ACCEPTED RESULT
+        # ----------------------------------------------------
 
         publish_ai_result(
             stroke,
             confidence,
             pairs
         )
+
 
     except (
         ValueError,
@@ -720,7 +1470,7 @@ def process_sensor_window(pairs):
 
 
 # ============================================================
-# MQTT SUBSCRIPTION
+# MQTT SUBSCRIPTIONS
 # ============================================================
 
 client.subscribe(
@@ -729,7 +1479,17 @@ client.subscribe(
     qos=0
 )
 
-client.enable_latency("ultra96")
+
+client.subscribe(
+    TOPIC_HANDEDNESS,
+    callback=handle_handedness,
+    qos=1
+)
+
+
+client.enable_latency(
+    "ultra96"
+)
 
 
 # ============================================================
@@ -738,27 +1498,61 @@ client.enable_latency("ultra96")
 
 def main():
 
-    if not os.path.exists(DPU_SOCKET_PATH):
+    if not os.path.exists(
+        DPU_SOCKET_PATH
+    ):
+
         logger.error(
             "DPU socket missing: %s",
             DPU_SOCKET_PATH
         )
+
         logger.error(
-            "Start dpu_server.py in pynq-venv first"
+            "Start dpu_server.py in "
+            "pynq-venv first"
         )
+
         return
 
-    logger.info(
-        "PickleViz MQTT-to-DPU consumer starting"
-    )
 
     logger.info(
-        "Expected CNN input: %d x %d",
+        "PickleViz MQTT-to-DPU "
+        "consumer starting"
+    )
+
+
+    logger.info(
+        "Expected CNN input: "
+        "%d x %d",
         SAMPLES_PER_STROKE,
         IMU_CHANNELS
     )
 
+
+    logger.info(
+        "Motion trigger: "
+        "gyro >= %.2f for %d samples",
+        GYRO_TRIGGER_THRESHOLD,
+        TRIGGER_CONFIRM_SAMPLES
+    )
+
+
+    logger.info(
+        "Window alignment: "
+        "%d pre-trigger + %d post-trigger",
+        PRE_TRIGGER_SAMPLES,
+        POST_TRIGGER_SAMPLES
+    )
+
+
+    logger.info(
+        "Confidence threshold: %.2f",
+        MIN_CONFIDENCE
+    )
+
+
     client.loop_start()
+
 
     try:
 
@@ -767,22 +1561,40 @@ def main():
             with sensor_changed:
 
                 while not pending_windows:
-                    sensor_changed.wait(timeout=0.5)
+
+                    sensor_changed.wait(
+                        timeout=0.5
+                    )
+
 
                 source, session_id, pairs = (
                     pending_windows.popleft()
                 )
 
-                if sensor_sessions[source] != session_id:
+
+                if (
+                    sensor_sessions[
+                        source
+                    ]
+                    != session_id
+                ):
+
                     continue
 
-            process_sensor_window(pairs)
+
+            # Run DPU outside the condition lock.
+            process_sensor_window(
+                pairs
+            )
+
 
     except KeyboardInterrupt:
 
         logger.info(
-            "Interrupted - disconnecting from MQTT"
+            "Interrupted - "
+            "disconnecting from MQTT"
         )
+
 
     finally:
 
@@ -791,4 +1603,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

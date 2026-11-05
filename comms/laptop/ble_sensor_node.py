@@ -379,7 +379,7 @@ class BLESensorNode:
             )
 
 
-    async def _periodic_clock_sync(self, interval_seconds: float = 60.0):
+    async def _periodic_clock_sync(self, interval_seconds: float = 600.0):
         # Keep the nodes half a period apart so they do not compete for the
         # laptop Bluetooth controller during clock synchronisation.
         first_delay = interval_seconds
