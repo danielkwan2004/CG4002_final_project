@@ -1,0 +1,17 @@
+# Logs
+*.log
+
+# Python
+**/__pycache__/
+.venv/
+
+# Certificates
+broker/certs/
+*.pem
+*.key
+
+# Config
+*.conf
+
+# Environment variables
+.env
