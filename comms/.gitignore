@@ -4,6 +4,8 @@
 # Python
 **/__pycache__/
 .venv/
+laptop/received_files/
+tests/
 
 # Certificates
 broker/certs/
@@ -15,3 +17,11 @@ broker/certs/
 
 # Environment variables
 .env
+
+# Unity
+unity-phone/
+
+*.csproj
+*.sln
+*.userprefs
+.DS_Store
