@@ -178,7 +178,7 @@ async def haptic_worker(haptic_queue: asyncio.Queue, forearm_node: BLESensorNode
         else:
             logger.debug("Dropped haptic command because the forearm write failed")
         
-async def main(verbose: bool, clock_resync: bool, mode: str, readiness_gate: bool = True):
+async def main(verbose: bool, clock_resync: bool, mode: str, readiness_gate: bool = False):
     logger = get_logger("laptop", verbose, log_dir=DEFAULT_LOG_DIR / "laptop")
 
     main_loop = asyncio.get_running_loop()
@@ -277,13 +277,13 @@ if __name__ == "__main__":
     modes.add_argument("-m", "--mode", choices=("stream", "keyboard", "both"), default="stream")
     modes.add_argument("-k", "--keyboard", dest="mode", action="store_const",
                        const="keyboard", help="Alias for --mode keyboard")
-    parser.add_argument("--no-readiness-gate", action="store_true",
-                        help="Publish immediately without SPACE start/stop (also permits headless stream mode)")
+    parser.add_argument("-g", "--readiness-gate", action="store_true",
+                        help="Require both sensors ready and SPACE to start/stop publishing (stream and both modes)")
     args = parser.parse_args()
-    if (args.mode in ("keyboard", "both") or not args.no_readiness_gate) and (os.name != "posix" or not sys.stdin.isatty()):
-        parser.error("Readiness gate and keyboard modes require an interactive macOS/Linux terminal; use --no-readiness-gate for headless stream mode")
+    if (args.mode in ("keyboard", "both") or args.readiness_gate) and (os.name != "posix" or not sys.stdin.isatty()):
+        parser.error("Readiness gate and keyboard modes require an interactive macOS/Linux terminal; use --mode stream without -g for headless streaming")
 
     try:
-        asyncio.run(main(args.verbose, args.clock_resync, args.mode, not args.no_readiness_gate))
+        asyncio.run(main(args.verbose, args.clock_resync, args.mode, args.readiness_gate))
     except KeyboardInterrupt:
         print("\nInterrupted - Shutting down...")

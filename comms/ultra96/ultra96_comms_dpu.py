@@ -47,7 +47,6 @@ from utilities.constants import (
 from utilities.logger_setup import get_logger
 from utilities.mqtt_client import MQTTClientWrapper
 
-
 # ============================================================
 # CONFIGURATION
 # ============================================================
@@ -104,7 +103,7 @@ MIN_CONFIDENCE = 0.70
 # ============================================================
 
 # Number of recent samples retained before motion detection.
-PRE_TRIGGER_SAMPLES = 100
+PRE_TRIGGER_SAMPLES = 300
 
 POST_TRIGGER_SAMPLES = (
     SAMPLES_PER_STROKE
@@ -119,14 +118,16 @@ POST_TRIGGER_SAMPLES = (
 # 100 is therefore a conservative starting trigger.
 #
 # Tune this later using actual idle measurements.
-GYRO_TRIGGER_THRESHOLD = 100.0
+GYRO_TRIGGER_THRESHOLD = 200.0
+ACCEL_TRIGGER_THRESHOLD = 17.0
+MAX_SEQUENCE_GAP = 20
 
 # Require several consecutive samples above the threshold.
-TRIGGER_CONFIRM_SAMPLES = 3
+TRIGGER_CONFIRM_SAMPLES = 5
 
 # Prevent one physical stroke from immediately triggering
 # another classification.
-STROKE_COOLDOWN_SECONDS = 1.0
+STROKE_COOLDOWN_SECONDS = 1.5
 
 
 # ============================================================
@@ -150,7 +151,7 @@ CLASSES = [
 MAX_PENDING_WINDOWS = 20
 
 # Same basic timing protection used during training capture.
-MAX_SAMPLE_GAP_MS = 20
+MAX_SAMPLE_GAP_MS = None
 
 
 # ============================================================
@@ -186,6 +187,14 @@ result_seq = 0
 result_session_id = uuid.uuid4().hex
 
 result_lock = threading.Lock()
+
+
+# ============================================================
+# HANDEDNESS STATE
+# ============================================================
+
+current_handedness = None
+handedness_lock = threading.Lock()
 
 haptic_seq = 0
 
@@ -421,6 +430,26 @@ def paddle_gyro_magnitude(packet):
         + gz * gz
     )
 
+def paddle_accel_magnitude(packet):
+    """
+    Calculate paddle acceleration magnitude.
+
+    sqrt(ax^2 + ay^2 + az^2)
+    """
+
+    paddle = decode_imu(
+        packet["paddle"]
+    )
+
+    ax = paddle[0]
+    ay = paddle[1]
+    az = paddle[2]
+
+    return math.sqrt(
+        ax * ax
+        + ay * ay
+        + az * az
+    )
 
 # ============================================================
 # PREPARE CNN WINDOW
@@ -503,7 +532,7 @@ def prepare_imu_window(pairs):
 # DPU REQUEST
 # ============================================================
 
-def request_dpu_prediction(samples):
+def request_dpu_prediction(samples, hand):
     """
     Send [400,12] samples to the local DPU server.
 
@@ -517,10 +546,15 @@ def request_dpu_prediction(samples):
         raise ValueError(
             "Incorrect CNN input length"
         )
-
+    
+    if hand not in ("left", "right"):
+        raise ValueError(
+            f"Invalid handedness: {hand}"
+        )
 
     request = {
-        "samples": samples
+        "hand": hand,
+        "samples": samples,
     }
 
 
@@ -664,7 +698,9 @@ def publish_ai_result(
 ):
 
     global result_seq
+    global results_since_haptic
     global haptic_seq
+    global last_haptic_time
 
 
     source = pairs[-1][
@@ -686,34 +722,15 @@ def publish_ai_result(
 
 
         result = {
-            "type":
-                PacketType.AI_RESULTS,
-
-            "source":
-                source,
-
-            "timestamp":
-                time.monotonic_ns()
-                // 1_000_000,
-
-            "session_id":
-                result_session_id,
-
-            "sensor_session_id":
-                sensor_session_id,
-
-            "result_seq":
-                result_seq,
-
-            "sensor_seq":
-                sensor_seq,
-
-            "stroke":
-                stroke,
-
-            "confidence":
-                confidence,
-
+            "type": PacketType.AI_RESULTS,
+            "source": source,
+            "timestamp": time.monotonic_ns() // 1_000_000,
+            "session_id": result_session_id,
+            "sensor_session_id": sensor_session_id,
+            "result_seq": result_seq,
+            "sensor_seq": sensor_seq,
+            "stroke": stroke,
+            "confidence": confidence,
             "sensor_sample_counts": {
                 name: sum(
                     packet.get(name)
@@ -725,7 +742,6 @@ def publish_ai_result(
                     "paddle"
                 )
             },
-
             "complete_pairs": sum(
                 packet.get("forearm")
                 is not None
@@ -762,6 +778,11 @@ def publish_ai_result(
         )
 
 
+        # Dummy source never triggers haptics.
+        if source == "dummy":
+            return
+
+
         # Publish one haptic command for every successfully published AI result.
         next_haptic_seq = haptic_seq + 1
         haptic = {
@@ -793,60 +814,42 @@ def publish_ai_result(
 # ============================================================
 
 def handle_handedness(msg):
-    """
-    Handedness is product/session metadata.
 
-    It is NOT an input to the current StrokeCNN.
-    """
+    global current_handedness
 
     try:
-
         handedness = json.loads(
-            msg.payload.decode(
-                "utf-8"
-            )
+            msg.payload.decode("utf-8")
         )
 
     except (
         ValueError,
         UnicodeDecodeError
     ):
-
         logger.warning(
-            "Ignoring malformed MQTT "
-            "handedness packet"
+            "Ignoring malformed MQTT handedness packet"
         )
-
         return
-
 
     if (
-        not isinstance(
-            handedness,
-            dict
-        )
-        or handedness.get(
-            "handedness"
-        )
-        not in (
-            "left",
-            "right"
-        )
+        not isinstance(handedness, dict)
+        or handedness.get("handedness")
+        not in ("left", "right")
     ):
-
         logger.warning(
-            "Ignoring invalid MQTT "
-            "handedness packet"
+            "Ignoring invalid MQTT handedness packet"
         )
-
         return
 
+    selected_hand = handedness["handedness"]
+
+    with handedness_lock:
+        current_handedness = selected_hand
 
     logger.info(
         "Received handedness: %s",
-        handedness["handedness"]
+        selected_hand
     )
-
 
 # ============================================================
 # SENSOR CALLBACK
@@ -1071,14 +1074,22 @@ def handle_sensor_data(msg):
                 sequence
                 != previous_seq + 1
             ):
+                missing = sequence - previous_seq - 1
 
                 logger.warning(
                     "Sequence gap for %s: "
                     "%d -> %d",
                     source,
                     previous_seq,
-                    sequence
+                    sequence,
+                    missing
                 )
+            
+                if missing > MAX_SEQUENCE_GAP:
+
+                    logger.warning(
+                            "Large sequence gap; ressesting stroke capture"
+                            )
 
 
                 sensor_buffers[
@@ -1218,14 +1229,29 @@ def handle_sensor_data(msg):
                 ].clear()
 
 
+                # Get the handedness currently selected by the phone.
+                with handedness_lock:
+                    hand = current_handedness
+
+                if hand is None:
+                    logger.warning(
+                        "Dropping captured stroke: "
+                        "handedness not selected"
+                    )
+
+                    sensor_buffers[source].clear()
+                    capture_states[source] = None
+                    motion_counts[source] = 0
+
+                    return
+
+
                 # Queue overflow protection.
                 if (
-                    len(
-                        pending_windows
-                    )
-                    >= MAX_PENDING_WINDOWS
+                    MAX_PENDING_WINDOWS > 0
+                    and len(pending_windows) >= MAX_PENDING_WINDOWS
+                    and len(pending_windows) > 0
                 ):
-
                     logger.warning(
                         "Inference queue full; "
                         "dropping oldest window"
@@ -1234,10 +1260,12 @@ def handle_sensor_data(msg):
                     pending_windows.popleft()
 
 
+
                 pending_windows.append(
                     (
                         source,
                         session_id,
+                        hand,
                         pairs
                     )
                 )
@@ -1309,6 +1337,12 @@ def handle_sensor_data(msg):
                 )
             )
 
+            accel_mag = (
+                    paddle_accel_magnitude(
+                        sensor
+                )
+            )   
+
         except (
             ValueError,
             KeyError
@@ -1324,6 +1358,7 @@ def handle_sensor_data(msg):
         if (
             gyro_mag
             >= GYRO_TRIGGER_THRESHOLD
+            and accel_mag >= ACCEL_TRIGGER_THRESHOLD
         ):
 
             motion_counts[
@@ -1346,6 +1381,8 @@ def handle_sensor_data(msg):
                 source
             ]
             >= TRIGGER_CONFIRM_SAMPLES
+            and len(buffer)
+            >= PRE_TRIGGER_SAMPLES
         ):
 
             pre_samples = list(
@@ -1365,9 +1402,10 @@ def handle_sensor_data(msg):
 
             logger.info(
                 "Stroke motion detected: "
-                "gyro=%.2f "
+                "gyro=%.2f accel=%.2f "
                 "pre_samples=%d",
                 gyro_mag,
+                accel_mag,
                 len(
                     pre_samples
                 )
@@ -1384,7 +1422,8 @@ def handle_sensor_data(msg):
 # ============================================================
 
 def process_sensor_window(
-    pairs
+    pairs,
+    hand
 ):
 
     source = pairs[-1][
@@ -1406,10 +1445,15 @@ def process_sensor_window(
             IMU_CHANNELS
         )
 
+        logger.info(
+            "Using %s-hand CNN",
+            hand
+        )
 
         stroke, confidence = (
             request_dpu_prediction(
-                samples
+                samples,
+                hand
             )
         )
 
@@ -1531,8 +1575,10 @@ def main():
 
     logger.info(
         "Motion trigger: "
-        "gyro >= %.2f for %d samples",
+        "gyro >= %.2f AND accel >= %.2f "
+        "for %d samples",
         GYRO_TRIGGER_THRESHOLD,
+        ACCEL_TRIGGER_THRESHOLD,
         TRIGGER_CONFIRM_SAMPLES
     )
 
@@ -1567,7 +1613,7 @@ def main():
                     )
 
 
-                source, session_id, pairs = (
+                source, session_id, hand, pairs = (
                     pending_windows.popleft()
                 )
 
@@ -1584,7 +1630,8 @@ def main():
 
             # Run DPU outside the condition lock.
             process_sensor_window(
-                pairs
+                pairs,
+                hand
             )
 
 
@@ -1592,7 +1639,7 @@ def main():
 
         logger.info(
             "Interrupted - "
-            "disconnecting from MQTT"
+            "disconnecting from MQTT,,m,s"
         )
 
 

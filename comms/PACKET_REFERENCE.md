@@ -149,7 +149,7 @@ The current communications service accepts variable window sizes. When replacing
   "haptic_seq": 1,
   "result_seq": 10,
   "sensor_seq": 2000,
-  "pattern": "double_pulse"
+  "pattern": "double"
 }
 ```
 
