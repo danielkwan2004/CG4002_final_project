@@ -14,12 +14,10 @@ from utilities.constants import (
     TOPIC_SENSOR, 
     TRANSPORT_TLS, 
 )
-from dotenv import load_dotenv
 from utilities.mqtt_client import MQTTClientWrapper
 from utilities.logger_setup import DEFAULT_LOG_DIR, get_logger
 
 
-load_dotenv()
 USER_ULTRA96 = os.getenv("USER_ULTRA96")
 PW_ULTRA96 = os.getenv("PW_ULTRA96")
 

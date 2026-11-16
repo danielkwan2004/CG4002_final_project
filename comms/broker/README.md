@@ -1,247 +1,179 @@
-# Local MQTT broker setup (macOS)
+# Manual MQTT/TLS broker setup
 
-Run Mosquitto on the laptop to connect the sensor relay/dummy sender, Ultra96,
-and Unity phone app. Python clients and the current Unity app use **MQTT over
-TCP/TLS on port 8883**, with username/password authentication. The existing
-configuration also enables secure WebSockets on port 9001; the current Unity
-client does not use that listener.
+The final product uses Mosquitto with TCP/TLS on port 8883 and username/password
+authentication. If you already have a working broker, reuse its certificates, configuration 
+and accounts; skip certificate generation.
 
-These instructions use the existing certificates and broker configuration.
-No FireBeetles or Ultra96 are needed for the local smoke test.
+Run commands from the directory containing `comms/`, using a macOS/Linux shell.
 
-## 1. Install and locate Mosquitto
+## 1. Install tools
 
-```sh
-brew install mosquitto
-```
-
-Run the remaining commands from the repository root:
+On macOS:
 
 ```sh
-cd /Users/ven/Uni/cg4002/CG4002_final_project
-export PATH="$(brew --prefix)/sbin:$PATH"
+brew install mosquitto openssl
+export PATH="$(brew --prefix openssl)/bin:$(brew --prefix)/sbin:$PATH"
 ```
 
-Adjust the repository path if your checkout is elsewhere. Repeat the `cd` and
-PATH export in each new terminal. If Mosquitto is already installed, skip installation.
-
-## 2. Check the existing configuration and certificates
-
-The project expects:
-
-```text
-comms/broker/
-├── mosquitto.conf
-└── certs/
-    ├── ca.crt          # Public CA certificate trusted by clients
-    ├── server.crt      # Broker certificate
-    ├── server.key      # Broker private key
-    └── passwordfile    # Mosquitto password hashes
-```
-
-The existing directory also contains CA signing files. These are not required
-on clients. Keep private keys and the password file on the broker/signing machine;
-clients only need `ca.crt`.
-
-Inspect the public certificate and verify its signature:
+On Debian/Ubuntu:
 
 ```sh
-openssl x509 -in comms/broker/certs/server.crt \
-  -noout -subject -dates -ext subjectAltName
-openssl verify -CAfile comms/broker/certs/ca.crt \
-  comms/broker/certs/server.crt
+sudo apt install mosquitto mosquitto-clients openssl
 ```
 
-The certificate inspected for this guide includes `localhost`, `127.0.0.1`, and
-`Venices-MacBook-Air.local`. It expires on 21 October 2027 UTC. Check your own
-output if the certificates have been replaced.
+The commands below require OpenSSL with `req -addext` support (1.1.1 or later).
+Run the project broker as your normal user. Check whether an existing broker
+service already occupies port 8883 before starting another instance.
 
-Open `comms/broker/mosquitto.conf` and confirm that every `cafile`, `certfile`,
-`keyfile`, and `password_file` points to an existing **absolute path** in this
-checkout. The current file uses `/Users/ven/Uni/cg4002/CG4002_final_project/`.
+## 2. Create certificates for a fresh deployment
 
-For reference, the required TCP/TLS listener is:
+Use these commands only when `comms/broker/certs/` does not already exist.
+The plain `mkdir` deliberately fails for an existing directory; do not continue
+if it fails. Keep the same terminal open through the certificate/config steps.
+
+```sh
+mkdir -p comms/broker
+mkdir -m 700 comms/broker/certs
+export PICKLEVIZ_CERT_DIR="$PWD/comms/broker/certs"
+```
+
+Generate a private CA and broker key. A restrictive umask protects new files:
+
+```sh
+(
+  umask 077
+  openssl genrsa -out "$PICKLEVIZ_CERT_DIR/ca.key" 2048
+  openssl req -x509 -new -sha256 -days 365 \
+    -key "$PICKLEVIZ_CERT_DIR/ca.key" \
+    -out "$PICKLEVIZ_CERT_DIR/ca.crt" \
+    -subj "/CN=PickleViz development CA" \
+    -addext "basicConstraints=critical,CA:TRUE" \
+    -addext "keyUsage=critical,keyCertSign,cRLSign"
+  openssl genrsa -out "$PICKLEVIZ_CERT_DIR/server.key" 2048
+  openssl req -new -key "$PICKLEVIZ_CERT_DIR/server.key" \
+    -out "$PICKLEVIZ_CERT_DIR/server.csr" -subj "/CN=PickleViz broker"
+)
+```
+
+Create `comms/broker/certs/server.ext` with this content. **Use your broker laptop's Tailscale IP**. 
+Add`,DNS:your-hostname` if clients will connect by hostname. SAN entries must match
+what clients enter as `BROKER_HOST`.
+
+```ini
+subjectAltName=DNS:localhost,IP:127.0.0.1,IP:YOUR_LAPTOP_TAILSCALE_IP
+basicConstraints=critical,CA:FALSE
+keyUsage=critical,digitalSignature,keyEncipherment
+extendedKeyUsage=serverAuth
+```
+
+Sign and check the broker certificate:
+
+```sh
+openssl x509 -req -in "$PICKLEVIZ_CERT_DIR/server.csr" \
+  -CA "$PICKLEVIZ_CERT_DIR/ca.crt" -CAkey "$PICKLEVIZ_CERT_DIR/ca.key" \
+  -CAcreateserial -out "$PICKLEVIZ_CERT_DIR/server.crt" \
+  -days 365 -sha256 -extfile "$PICKLEVIZ_CERT_DIR/server.ext"
+openssl verify -CAfile "$PICKLEVIZ_CERT_DIR/ca.crt" "$PICKLEVIZ_CERT_DIR/server.crt"
+openssl x509 -in "$PICKLEVIZ_CERT_DIR/server.crt" -noout -dates -ext subjectAltName
+```
+
+Verification should report `OK`. Clients need only the public `ca.crt`.
+Keep CA/server private keys on the broker/signing machine. Replacing the CA
+requires updating every client's trust certificate, including the phone app.
+
+## 3. Create MQTT accounts
+
+For a new password file, create the laptop account first, then add the others:
+
+```sh
+mosquitto_passwd -c comms/broker/certs/passwordfile laptop_cli
+mosquitto_passwd comms/broker/certs/passwordfile ultra96
+mosquitto_passwd comms/broker/certs/passwordfile phone
+chmod 600 comms/broker/certs/passwordfile
+```
+
+Each command prompts for a password. Use `-c` only for a new file: it overwrites
+existing accounts. For an existing deployment, reuse its account names/passwords
+or update accounts without `-c`, then restart the broker.
+
+Set the matching laptop/Ultra96 credentials in each machine's `comms/.env`.
+The phone account is entered in the app. The final DPU consumer uses
+`USER_ULTRA96`/`PW_ULTRA96`.
+
+## 4. Write the broker configuration
+
+Create `comms/broker/mosquitto.conf` with the following content. Replace every
+`/absolute/path/to/comms/broker/certs` with the actual path printed by
+`echo "$PICKLEVIZ_CERT_DIR"`. These are literal absolute paths, not shell variables.
 
 ```conf
 listener 8883
+protocol mqtt
+allow_anonymous false
 cafile /absolute/path/to/comms/broker/certs/ca.crt
 certfile /absolute/path/to/comms/broker/certs/server.crt
 keyfile /absolute/path/to/comms/broker/certs/server.key
 require_certificate false
-allow_anonymous false
 password_file /absolute/path/to/comms/broker/certs/passwordfile
 ```
 
-`require_certificate false` means clients do not supply their own certificates;
-they still validate the broker certificate and authenticate with a password.
-The existing config also has the optional port 9001 WebSocket listener.
+Clients validate the server certificate and authenticate with a password; they
+do not supply client certificates. This configuration allows authenticated
+accounts to use all application topics. If you move the deployment, update these paths.
 
-Certificates and `.conf` files are ignored by this repository's Git rules. A
-fresh clone may not include them: obtain the existing broker deployment files,
-or provision a new CA/server certificate with SANs matching the hostnames/IPs
-you will use, before starting. Do not overwrite the working CA just to run locally.
-
-## 3. Configure MQTT accounts
-
-If the existing accounts and passwords are known, reuse them and skip this step.
-Otherwise, add/update accounts interactively; substitute your chosen usernames:
-
-```sh
-mosquitto_passwd comms/broker/certs/passwordfile laptop_cli
-mosquitto_passwd comms/broker/certs/passwordfile ultra96
-mosquitto_passwd comms/broker/certs/passwordfile phone
-```
-
-Each command prompts for a password. Updating an existing username changes its
-password, so update that client's credentials too. Restart the broker afterward.
-
-**Only if `passwordfile` does not exist**, create it with the first account:
-
-```sh
-mosquitto_passwd -c comms/broker/certs/passwordfile laptop_cli
-```
-
-Then add the remaining accounts without `-c`. The `-c` flag overwrites an existing
-password file. The current broker has no topic ACL: authenticated accounts can
-use all application topics.
-
-## 4. Start the project broker
-
-In terminal 1:
+## 5. Start and verify the broker
 
 ```sh
 mosquitto -c "$PWD/comms/broker/mosquitto.conf" -v
 ```
 
-Keep this terminal open. Stop the broker with **Ctrl-C**. Successful startup logs
-show the listener on port 8883 (and 9001 with the existing full configuration).
+Keep this terminal open; stop with Ctrl-C. Run as the owner of the generated
+files so the broker can read the restricted key directory.
 
-Use the explicit project configuration above. `brew services start mosquitto`
-uses Homebrew's configuration, which may not contain this project's TLS settings.
-If a Homebrew service already occupies the port, inspect it with
-`brew services list`; stop that service with `brew services stop mosquitto` before
-starting the project instance.
+Use two additional terminals, both in the directory containing `comms/`.
+Replace the credential placeholders with an account created above.
 
-## 5. Verify publish/subscribe locally
-
-In terminal 2, substitute an existing MQTT username and password:
+Subscriber:
 
 ```sh
 mosquitto_sub -h localhost -p 8883 \
   --cafile "$PWD/comms/broker/certs/ca.crt" \
-  -u 'YOUR_USERNAME' -P 'YOUR_PASSWORD' \
-  -t 'test/local-broker' -C 1 -v
+  -u YOUR_USERNAME -P YOUR_PASSWORD -t test/comms -C 1 -v
 ```
 
-In terminal 3, publish using valid credentials:
+Publisher:
 
 ```sh
 mosquitto_pub -h localhost -p 8883 \
   --cafile "$PWD/comms/broker/certs/ca.crt" \
-  -u 'YOUR_USERNAME' -P 'YOUR_PASSWORD' \
-  -t 'test/local-broker' -m 'broker works'
+  -u YOUR_USERNAME -P YOUR_PASSWORD -t test/comms -m 'broker works'
 ```
 
-Terminal 2 should print `test/local-broker broker works` and exit. Passwords passed
-with `-P` can appear in shell history/process arguments; use test credentials for
-these manual checks.
+The subscriber should print `test/comms broker works` and exit. Quote passwords
+containing shell-special characters. Command-line passwords can appear in shell
+history/process listings; use temporary test credentials for this check.
 
-## 6. Run the complete local test without hardware
+This verifies TLS, authentication and MQTT delivery without project demo scripts
+or hardware. Continue with the [live system instructions](../README.md).
+For the final deployment, keep Tailscale connected on the broker laptop and
+Ultra96 in the same tailnet. Follow the
+[Tailscale setup](../README.md#network-connection-using-tailscale). Allow TCP 8883
+in the tailnet policy and laptop firewall. The `listener 8883` configuration
+above accepts remote connections; do not replace it with a loopback-only listener.
 
-Use the existing `comms/.venv` if available. For a new macOS environment:
-
-```sh
-python3 -m venv comms/.venv
-comms/.venv/bin/python -m pip install -r comms/requirements.txt
-```
-
-Create or edit `comms/.env`, preserving any existing entries. Set these to the
-accounts/passwords in Mosquitto's password file:
-
-```dotenv
-USER_LAPTOP_CLI=laptop_cli
-PW_LAPTOP_CLI=replace_with_laptop_password
-USER_ULTRA96_COMMS=ultra96
-PW_ULTRA96_COMMS=replace_with_ultra96_password
-```
-
-In terminal 2, start the simulated Ultra96 consumer on the laptop:
-
-```sh
-export BROKER_HOST=localhost
-export CA_CERTS_PATH="$PWD/comms/broker/certs/ca.crt"
-comms/.venv/bin/python comms/ultra96/ultra96_comms.py
-```
-
-In terminal 3, start the dummy sender:
-
-```sh
-export BROKER_HOST=localhost
-export CA_CERTS_PATH="$PWD/comms/broker/certs/ca.crt"
-comms/.venv/bin/python comms/laptop/send_dummy_sensors.py --interval 2
-```
-
-Export the broker/CA overrides **before starting Python**: shared constants read
-them at import time, before these scripts call `load_dotenv()`.
-
-Expected flow:
-
-```text
-Dummy sender → local broker → simulated Ultra96 consumer
-             ← local broker ← AI result
-```
-
-The sender generates 200 paired samples over one second, starting a capture every
-two seconds, and prints incoming AI results. This consumer returns random
-predictions; this verifies MQTT transport and collection, not DPU inference.
-QoS 0 sensor delivery can lose packets. Dummy input does not trigger haptics.
-Run this separately from the real BLE pipeline and other sensor publishers.
-
-## 7. Connect the real Ultra96 or phone
-
-For a direct network connection, use the laptop's reachable LAN hostname/IP as
-the broker host. `localhost` on the Ultra96 or phone refers to that device itself.
-The chosen hostname/IP must appear in the broker certificate SANs. Allow incoming
-connections to Mosquitto through the macOS firewall and use a network that permits
-device-to-device traffic.
-
-- **Ultra96:** deploy the consumer and sibling `utilities` directory, plus the
-  public `ca.crt`. Set `BROKER_HOST` before launching Python.
-- **Reverse SSH tunnel:** if your existing tunnel forwards Ultra96's local port
-  8883 to the laptop broker, use `BROKER_HOST=localhost` on Ultra96. The tunnel
-  must be running; starting Mosquitto alone does not create it.
-- **Unity phone:** configure the laptop's reachable address, port `8883`, and
-  MQTT credentials. Ensure the app trusts the same CA. A replacement CA requires
-  updating the app's bundled trust certificate too.
-
-The two Ultra96 entry points currently have different settings:
-
-| Entry point | Credential environment variables | CA certificate | Inference |
-|---|---|---|---|
-| `ultra96_comms.py` | `USER_ULTRA96_COMMS`, `PW_ULTRA96_COMMS` | `CA_CERTS_PATH` override | Random predictions, one-second windows |
-| `ultra96_comms_dpu.py` | `USER_ULTRA96`, `PW_ULTRA96` | Hard-coded `/comms/ca.crt` | Local DPU server at `/tmp/pickleviz_dpu.sock` |
-
-For DPU testing, provide those DPU credentials in the Ultra96 environment or
-`.env`, install the CA at `/comms/ca.crt`, and start the DPU server before the
-consumer. `CA_CERTS_PATH` does not override that script's hard-coded CA path.
-Run only the intended consumer to avoid duplicate results.
+Repeat the MQTT check from Ultra96, replacing `-h localhost` with
+`-h YOUR_LAPTOP_TAILSCALE_IP` and `--cafile` with Ultra96's actual local CA path
+(for example `/comms/ca.crt`). Use the `ultra96` account and its configured
+password. This verifies the Tailscale route, MQTT authentication and TLS trust.
+No reverse SSH tunnel or public router port forwarding is needed.
 
 ## Troubleshooting
 
-| Symptom | Check |
+| Failure | Check |
 |---|---|
-| Address already in use | `lsof -nP -iTCP:8883 -sTCP:LISTEN` and the equivalent for port 9001; identify the existing broker before stopping it. |
-| Cannot load CA, server key, or password file | Absolute paths in `mosquitto.conf` and read permission for the user running Mosquitto. |
-| Certificate verification fails | CA trust, certificate expiry, machine clock, and hostname/IP SAN match. |
-| Not authorised / connection rejected | Username/password, matching `.env` variable names, and broker restart after password changes. |
-| Connection refused | Broker process and port; on a remote device, ensure `localhost` is intentional. |
-| Remote connection times out | Routing, firewall, network client isolation, or an inactive SSH tunnel. |
-| No results | Consumer subscription/connection, sender logs, and matching broker host; DPU mode also needs its local inference server. |
-| WebSocket listener fails | If only using current Python/Unity TCP clients, remove the optional 9001 listener block from your local config and retain the 8883 TLS listener. |
-
-## References
-
-- [Homebrew Mosquitto installation and service configuration](https://formulae.brew.sh/formula/mosquitto)
-- Installed manuals: `man mosquitto.conf`, `man mosquitto_passwd`, `man mosquitto_sub`.
-- Project implementation: `mosquitto.conf`, `../utilities/constants.py`,
-  `../utilities/mqtt_client.py`, and the two Ultra96 entry points.
+| Command not found | Tool installation and bin/sbin directories on PATH |
+| Address in use | Existing broker/service listening on 8883 |
+| Cannot load config/key/password file | Absolute paths and permissions for the broker user |
+| Certificate verification failed | CA trust, hostname/IP SAN, expiry and device clock |
+| Not authorised | Account/password and correct credential variable names |
+| Remote timeout | Both Tailscale devices connected, correct laptop Tailscale IP, tailnet access policy, laptop firewall and non-loopback broker listener |

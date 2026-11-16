@@ -1,7 +1,6 @@
+-r requirements-runtime.txt
 bleak==3.0.2
-paho-mqtt==2.1.0
-pyobjc-core==12.2.2
-pyobjc-framework-Cocoa==12.2.2
-pyobjc-framework-CoreBluetooth==12.2.2
-pyobjc-framework-libdispatch==12.2.2
-python-dotenv==1.2.3
+pyobjc-core==12.2.2; sys_platform == "darwin"
+pyobjc-framework-Cocoa==12.2.2; sys_platform == "darwin"
+pyobjc-framework-CoreBluetooth==12.2.2; sys_platform == "darwin"
+pyobjc-framework-libdispatch==12.2.2; sys_platform == "darwin"

@@ -38,7 +38,7 @@ class Synchroniser:
         output_queue,
         logger,
         tolerance_ms=2.5,
-        pairing_timeout_ms=2000,
+        pairing_timeout_ms=1000,
         max_buffer_len=1000,
         readiness_gate=False,
     ):

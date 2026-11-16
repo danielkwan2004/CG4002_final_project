@@ -11,9 +11,9 @@ from .constants import (BROKER_HOST, PORT_TLS, TRANSPORT_TLS, CA_CERTS_PATH,
                        TOPIC_LATENCY_REQUEST, TOPIC_LATENCY_RESPONSE)
 
 
-class MQTTClientWrapper: 
+class MQTTClientWrapper:
     """
-    Reuseable MQTT client wrapper supporting both TLS (plain) and WSS transports, 
+    Reusable MQTT client wrapper supporting TLS over TCP transport,
     selected via the `transport` argument.
     """
 
@@ -22,14 +22,14 @@ class MQTTClientWrapper:
             client_id: str,
             host: str = BROKER_HOST,
             port: int = PORT_TLS,
-            transport: str = TRANSPORT_TLS, 
+            transport: str = TRANSPORT_TLS,
             ca_certs: str = CA_CERTS_PATH,
             username: str = None,
             password: str = None,
             lwt_topic: str = None,
             lwt_payload: str = None,
             logger=None
-    ): 
+    ):
         self.client_id = client_id
         self.host = host
         self.port = port
@@ -44,7 +44,7 @@ class MQTTClientWrapper:
 
         # TLS layer added separately
         self.client.tls_set(
-            ca_certs=ca_certs, 
+            ca_certs=ca_certs,
             tls_version=ssl.PROTOCOL_TLS_CLIENT
         )
 
@@ -54,7 +54,7 @@ class MQTTClientWrapper:
         if lwt_topic and lwt_payload:
             self.client.will_set(lwt_topic, payload=lwt_payload, qos=1, retain=False)
 
-        
+
         self.client.reconnect_delay_set(min_delay=1, max_delay=15)
         self.client.max_queued_messages_set(100)
         self.client.on_connect_fail = self._on_connect_fail
@@ -90,7 +90,7 @@ class MQTTClientWrapper:
     def _on_disconnect(self, client, userdata, disconnect_flags, rc, properties=None):
         self._log("info" if rc == 0 else "warning", f"Disconnected from {self.host}:{self.port} - {rc}")
 
-    def _on_message(self, client, userdata, msg): 
+    def _on_message(self, client, userdata, msg):
         # Source follows this application's topic contract, not words in JSON.
         source = {
             TOPIC_SENSOR: "laptop",
@@ -99,7 +99,7 @@ class MQTTClientWrapper:
 
         self._log("debug", f"[MQTT -> {self.client_id.upper()}] {msg.topic}: "
                   f"{format_packet_for_log(msg.payload)}", device=source)
-        
+
         if msg.topic in self._message_callbacks:
             self._message_callbacks[msg.topic](msg)
 

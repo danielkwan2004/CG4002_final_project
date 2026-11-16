@@ -30,8 +30,6 @@ from collections import deque
 
 import _bootstrap
 
-from dotenv import load_dotenv
-
 from utilities.constants import (
     PacketType,
     CA_CERTS_PATH,
@@ -50,8 +48,6 @@ from utilities.mqtt_client import MQTTClientWrapper
 # ============================================================
 # CONFIGURATION
 # ============================================================
-
-load_dotenv()
 
 USER_ULTRA96 = os.getenv("USER_ULTRA96")
 PW_ULTRA96 = os.getenv("PW_ULTRA96")
@@ -103,7 +99,7 @@ MIN_CONFIDENCE = 0.70
 # ============================================================
 
 # Number of recent samples retained before motion detection.
-PRE_TRIGGER_SAMPLES = 300
+PRE_TRIGGER_SAMPLES = 200
 
 POST_TRIGGER_SAMPLES = (
     SAMPLES_PER_STROKE
@@ -119,8 +115,8 @@ POST_TRIGGER_SAMPLES = (
 #
 # Tune this later using actual idle measurements.
 GYRO_TRIGGER_THRESHOLD = 200.0
-ACCEL_TRIGGER_THRESHOLD = 17.0
-MAX_SEQUENCE_GAP = 20
+ACCEL_TRIGGER_THRESHOLD = 13.0
+MAX_SEQUENCE_GAP = 50
 
 # Require several consecutive samples above the threshold.
 TRIGGER_CONFIRM_SAMPLES = 5
@@ -155,13 +151,6 @@ MAX_SAMPLE_GAP_MS = None
 
 
 # ============================================================
-# TLS
-# ============================================================
-
-CA_CERTIFICATE = "/comms/ca.crt"
-
-
-# ============================================================
 # MQTT CLIENT
 # ============================================================
 
@@ -169,7 +158,7 @@ client = MQTTClientWrapper(
     client_id="ultra96",
     port=PORT_TLS,
     transport=TRANSPORT_TLS,
-    ca_certs=CA_CERTIFICATE,
+    ca_certs=CA_CERTS_PATH,
     username=USER_ULTRA96,
     password=PW_ULTRA96,
     lwt_topic="sys/ultra96/status",
@@ -1078,7 +1067,7 @@ def handle_sensor_data(msg):
 
                 logger.warning(
                     "Sequence gap for %s: "
-                    "%d -> %d",
+                    "%d -> %d (%d missing)",
                     source,
                     previous_seq,
                     sequence,
@@ -1105,6 +1094,16 @@ def handle_sensor_data(msg):
                 motion_counts[
                     source
                 ] = 0
+
+            else:
+
+                missing = sequence - previous_seq - 1
+              
+                if (missing != 0):
+                    logger.info(
+                            "Tolerating small sequence gap: %d missing",
+                            missing
+                            )
 
 
             if (
@@ -1155,7 +1154,7 @@ def handle_sensor_data(msg):
 
                 capture_states[
                     source
-                ] = None
+               ] = None
 
 
                 motion_counts[

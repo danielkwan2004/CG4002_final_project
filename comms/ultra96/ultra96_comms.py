@@ -22,12 +22,10 @@ from utilities.constants import (
     TOPIC_SENSOR,
     TRANSPORT_TLS,
 )
-from dotenv import load_dotenv
 from utilities.logger_setup import get_logger
 from utilities.mqtt_client import MQTTClientWrapper
 
 
-load_dotenv()
 USER_ULTRA96 = os.getenv("USER_ULTRA96_COMMS")
 PW_ULTRA96 = os.getenv("PW_ULTRA96_COMMS")
 
@@ -105,7 +103,7 @@ def publish_ai_result(stroke, confidence, pairs):
         if source == "dummy":
             return
 
-        # Trigger after 10 streaming AI results, at least 10 seconds since last haptic.
+        # Trigger after 10 streaming AI results and the configured minimum interval.
         results_since_haptic += 1
         now = time.monotonic()
         if (results_since_haptic >= HAPTIC_RESULTS_PER_TRIGGER
@@ -119,7 +117,7 @@ def publish_ai_result(stroke, confidence, pairs):
                 "haptic_seq": haptic_seq,
                 "result_seq": result_seq,
                 "sensor_seq": sensor_seq,
-                "pattern": "double_pulse",
+                "pattern": "double",
             }, qos=1)
             results_since_haptic = 0
             last_haptic_time = now

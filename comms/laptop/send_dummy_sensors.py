@@ -7,7 +7,6 @@ import time
 import uuid
 
 import _bootstrap
-from dotenv import load_dotenv
 from dummy_sensor_node import DummySensorNode
 from synchroniser import paired_sensor_packet
 from utilities.constants import TOPIC_RESULTS, TOPIC_SENSOR
@@ -34,7 +33,6 @@ async def send_capture(nodes, client, session_id, sequence):
 
 
 async def main(interval, verbose):
-    load_dotenv()
     logger = get_logger("dummy_sender", verbose, log_dir=DEFAULT_LOG_DIR / "laptop")
     nodes = [DummySensorNode(name, asyncio.Queue(), logger)
              for name in ("forearm", "paddle")]

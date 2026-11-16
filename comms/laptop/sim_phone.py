@@ -4,17 +4,15 @@ import os
 import _bootstrap
 from utilities.constants import (
     CA_CERTS_PATH,
-    PORT_WSS, 
-    TOPIC_RESULTS, 
-    TOPIC_SENSOR, 
-    TRANSPORT_WSS
+    PORT_TLS,
+    TOPIC_RESULTS,
+    TOPIC_SENSOR,
+    TRANSPORT_TLS
 )
-from dotenv import load_dotenv
 from utilities.mqtt_client import MQTTClientWrapper
 from utilities.logger_setup import DEFAULT_LOG_DIR, get_logger
 
 
-load_dotenv()
 USER_PHONE = os.getenv("USER_PHONE")
 PW_PHONE = os.getenv("PW_PHONE")
 
@@ -26,8 +24,8 @@ logger = get_logger("sim_phone", verbose=args.verbose, log_dir=DEFAULT_LOG_DIR /
 
 client = MQTTClientWrapper(
     client_id="sim_phone",
-    port=PORT_WSS,
-    transport=TRANSPORT_WSS,
+    port=PORT_TLS,
+    transport=TRANSPORT_TLS,
     ca_certs=CA_CERTS_PATH,
     username=USER_PHONE,
     password=PW_PHONE,

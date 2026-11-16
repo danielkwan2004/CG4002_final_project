@@ -1,16 +1,17 @@
 import os
 from pathlib import Path
 import struct
+from dotenv import load_dotenv
 from enum import IntEnum, unique
 
-BROKER_HOST = os.getenv("BROKER_HOST", "Venices-MacBook-Air.local")
-CA_CERTS_PATH = os.getenv("CA_CERTS_PATH", str(Path(__file__).resolve().parents[1] / "broker/certs/ca.crt"))
+COMMS_DIR = Path(__file__).resolve().parents[1]
+load_dotenv(COMMS_DIR / ".env", override=False)
+
+BROKER_HOST = os.getenv("BROKER_HOST", "localhost")
+CA_CERTS_PATH = os.getenv("CA_CERTS_PATH", str(COMMS_DIR / "broker/certs/ca.crt"))
 
 PORT_TLS = 8883
-PORT_WSS = 9001
-
 TRANSPORT_TLS = "tcp"
-TRANSPORT_WSS = "websockets"
 
 # Shared MQTT routes; the Unity client keeps matching topic strings in C#.
 TOPIC_SENSOR  = "fb/sensor/raw"
@@ -20,8 +21,8 @@ TOPIC_HAPTICS = "ultra96/ai/haptics"
 TOPIC_LATENCY_REQUEST = "latency/{device}/req"
 TOPIC_LATENCY_RESPONSE = "latency/{device}/resp"
 
-STROKES = ["forehand", "backhand", "overhead stroke", "overhead smash", 
-           "underhand short arch", "underhand long arch"]
+STROKES = ["forehand", "backhand", "overhead", "underhand",
+           "forehand_volley", "backhand_volley"]
 
 
 # Standard little-endian sizes, without native alignment: 2 uint32 + 6 float32
@@ -75,7 +76,7 @@ PKT_HAPTIC_CMD = PacketType.HAPTIC_CMD
 SENSOR_BATCH_SIZE = 5
 MAX_SYNC_RTT_MS = 50.0
 BLE_WRITE_TIMEOUT_SECONDS = 1.0
-HAPTIC_MIN_INTERVAL_SECONDS = 10.0
+HAPTIC_MIN_INTERVAL_SECONDS = 2.0
 HAPTIC_RESULTS_PER_TRIGGER = 10
 
 SERVICE_UUID = "25E2CCC3-D857-49A6-AFDC-F6895F1854B0"

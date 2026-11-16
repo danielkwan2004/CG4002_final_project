@@ -19,13 +19,11 @@ from utilities.constants import (
     CA_CERTS_PATH,
     HAPTIC_MIN_INTERVAL_SECONDS,
 )
-from dotenv import load_dotenv
 from utilities.logger_setup import DEFAULT_LOG_DIR, get_logger
 from utilities.mqtt_client import MQTTClientWrapper
 from synchroniser import Synchroniser
 
 
-load_dotenv()
 USER_LAPTOP_CLI = os.getenv("USER_LAPTOP_CLI")
 PW_LAPTOP_CLI = os.getenv("PW_LAPTOP_CLI")
 
