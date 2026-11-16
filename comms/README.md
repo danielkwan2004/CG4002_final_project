@@ -57,7 +57,8 @@ requires a working Bluetooth adapter and BlueZ service. The submitted operating 
 ## 2. Configure the broker and clients
 
 Follow [broker/README.md](broker/README.md) to generate a CA/server certificate,
-create MQTT accounts, and start Mosquitto on TCP/TLS port 8883.
+create MQTT accounts, enable the supplied `broker/acl`, and start Mosquitto on
+TCP/TLS port 8883. The ACL grants each account only its required topic permissions.
 
 Copy the template once, then edit it to match your broker accounts:
 
@@ -93,7 +94,7 @@ PW_ULTRA96=replace_with_existing_password
 
 Perform the publish/subscribe check in [broker/README.md](broker/README.md).
 It uses Mosquitto CLI tools and needs no project simulators or validation files.
-A successful check prints `test/comms broker works`. It verifies broker transport,
+A successful check prints `fb/sensor/raw {"acl_check":"broker works"}`. It verifies broker transport,
 not BLE acquisition, FPGA inference or phone rendering.
 
 ## 4. Prepare and run BLE hardware
@@ -223,6 +224,7 @@ redelivered. BLE setup retries discovery/handshake/synchronisation automatically
 | CA/configuration error | Absolute CA path, file permissions and `.env` values |
 | TLS hostname failure | Broker SAN, chosen hostname/IP, clock and certificate expiry |
 | MQTT auth failure | Correct account variable pair for the selected script |
+| MQTT connected but messages missing | ACL username and topic permissions; production broker restarted with the ACL |
 | No BLE node | Board role/name, power, Bluetooth permission and another connected central |
 | No sensor publication | Optional session gate, firmware calibration/reference and motion |
 | Many singles/late drops | Both boards, clock alignment and BLE delivery; inspect serial logs |

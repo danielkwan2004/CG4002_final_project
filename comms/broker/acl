@@ -1,0 +1,33 @@
+# MQTT topic permissions, matched by username.
+# Unlisted users/topics have no access. Keep allow_anonymous false in the broker.
+# These names match .env.example and the current broker accounts.
+
+# Laptop BLE gateway: sensor producer, feedback recipient and latency initiator.
+user laptop_cli
+topic write fb/sensor/raw
+topic read ultra96/ai/haptics
+topic read phone/handedness
+topic read sys/ultra96/status
+topic readwrite latency/laptop/req
+topic readwrite latency/laptop/resp
+topic write latency/ultra96/req
+topic write latency/phone/req
+
+# Ultra96: sensor/handedness consumer, inference and haptic producer.
+user ultra96
+topic read fb/sensor/raw
+topic read phone/handedness
+topic write ultra96/ai/results
+topic write ultra96/ai/haptics
+topic write sys/ultra96/status
+topic read latency/ultra96/req
+topic write latency/laptop/resp
+
+# Phone: sensor/result consumer, retained handedness producer and latency echo.
+user phone
+topic read fb/sensor/raw
+topic read ultra96/ai/results
+topic read sys/ultra96/status
+topic write phone/handedness
+topic read latency/phone/req
+topic write latency/laptop/resp
