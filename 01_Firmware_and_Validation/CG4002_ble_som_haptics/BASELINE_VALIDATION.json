@@ -1,0 +1,88 @@
+{
+  "date": "2026-10-28",
+  "status": "SOFTWARE_VALIDATED_PHYSICAL_BLE_P1_PENDING",
+  "architecture": "User-directed hardware-local motion detectors; existing BLE receiver combines independent streams with OR/nulls.",
+  "central_joint_energy_omitted": true,
+  "full_central_joint_detector_equivalence_claimed": false,
+  "accepted_motion_checkpoint": "C:\\Users\\USER\\Documents\\NUS\\Y3S1_mods\\CG4002\\CG4002_final_project\\CG4002_hardware\\CG4002_two_node\\checkpoints\\JCP5_USER_ACCEPTED_before_BLE_20261028",
+  "original_BLE_files_preserved": 25,
+  "original_motion_files_preserved_except_status_documents": 181,
+  "original_final_capture_files_preserved": 76,
+  "original_JCP5a_capture_files_preserved": 78,
+  "core_sensor_detector_files_identical_to_motion_baseline": [
+    "ShadowDetector.h",
+    "MotionFeatures.h",
+    "MotionBaseline.h",
+    "MotionGateConfig.h",
+    "Calibration.h",
+    "Calibration.cpp",
+    "AccelCalibrationConfig.h",
+    "LowPassFilter.h",
+    "LowPassFilter.cpp",
+    "ICM42686P.h",
+    "ICM42686P.cpp",
+    "AxisMapping.h",
+    "SensorFrame.h",
+    "ImuConfig.h",
+    "ImuHealth.h"
+  ],
+  "native_tests": {
+    "forearm": "PASS",
+    "paddle": "PASS",
+    "scope": [
+      "actual sketch pipeline + calibration-failure case",
+      "local reference/motion/history/timing-wrap/invalid fallback",
+      "BLE protocol/units/timestamps/history/source1/reconnect"
+    ]
+  },
+  "recorded_native_local_decision_parity_samples": 183300,
+  "replay_coverage": "All original cue associations plus all3 JCP5a cues supported by local OR; preserve original first close-pair short-window exception.",
+  "build_target": "esp32:esp32:dfrobot_firebeetle2_esp32e",
+  "ESP32_core": "3.3.11",
+  "builds": {
+    "forearm": {
+      "compiled": true,
+      "flash_bytes": 650575,
+      "static_ram_bytes": 56224,
+      "bin_sha256": "77061651d844382ed22e34d93512a1f2ec47138d32a93d39915464ab41edbdf8",
+      "uploaded": false
+    },
+    "paddle": {
+      "compiled": true,
+      "flash_bytes": 650575,
+      "static_ram_bytes": 56224,
+      "bin_sha256": "05baf055ebb5b9f6a2458c58c200e4cbd2ed65348c14c8512bac482ad5cb890c",
+      "uploaded": false
+    }
+  },
+  "BLE_protocol_unchanged": [
+    "service/characteristic UUIDs",
+    "forearm/paddle names",
+    "encrypted properties/security",
+    "MTU185",
+    "connection parameters",
+    "handshake/sync/control messages",
+    "0x09 count/source header",
+    "little-endian II6f",
+    "milliseconds",
+    "m/s^2 and deg/s"
+  ],
+  "physical_BLE_test": "PENDING",
+  "receiver_source_available": false,
+  "receiver_code_modified": false,
+  "next_test": {
+    "guide": "BLE_PLAY_TEST.md",
+    "prompts": "play_test_prompts.py",
+    "timed_seconds": 213,
+    "cues": 15,
+    "setup_pauses": 3
+  },
+  "limitations": [
+    "Hardware-local selection intentionally omits central joint-energy additions; not identical to full JCP selection.",
+    "Each independent node has its own history/ending; existing merger must handle delayed history timestamps and null counterparts.",
+    "Unchanged wire packet cannot transmit IMU status/segment boundary/quiet-heartbeat flags. Sensor health stays on Serial; silence alone cannot distinguish disconnect from idle.",
+    "Unknown valid feature windows favor coverage; unusable samples omitted, not zero-filled.",
+    "Actual BLE link, client combined-payload behavior and ball contact await physical testing."
+  ],
+  "hardware_flashed_by_agent": false
+}

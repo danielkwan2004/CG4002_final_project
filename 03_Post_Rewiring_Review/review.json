@@ -1,0 +1,239 @@
+{
+  "status": "OBSERVED_IMU_TIMING_AND_HAPTIC_COMMAND_CHECKS_PASS_STARTUP_REPEATABILITY_LIMITED",
+  "captures": [
+    {
+      "capture": "paddle_20261101_233805_230926",
+      "role": "paddle",
+      "duration_s": 30.59246610000264,
+      "printed_samples": 548,
+      "first_health": {
+        "type": "health",
+        "node": "paddle",
+        "ms": 16124,
+        "ready": true,
+        "attempts": 3001,
+        "good": 3001,
+        "failures": 0,
+        "consecutive": 0,
+        "max_consecutive": 0,
+        "invalid_codes": 0,
+        "saturated": 0,
+        "skipped": 0,
+        "reinitializations": 0,
+        "acquisition_hz": 200.001,
+        "min_dt_us": 4961,
+        "max_dt_us": 5021,
+        "min_norm_g": 0.94566,
+        "max_norm_g": 1.05595,
+        "max_gyro_dps": 9.239,
+        "haptic_commands": 0
+      },
+      "last_health": {
+        "type": "health",
+        "node": "paddle",
+        "ms": 27145,
+        "ready": true,
+        "attempts": 5205,
+        "good": 5205,
+        "failures": 0,
+        "consecutive": 0,
+        "max_consecutive": 0,
+        "invalid_codes": 0,
+        "saturated": 0,
+        "skipped": 0,
+        "reinitializations": 0,
+        "acquisition_hz": 200.0,
+        "min_dt_us": 4933,
+        "max_dt_us": 5066,
+        "min_norm_g": 0.13283,
+        "max_norm_g": 12.88541,
+        "max_gyro_dps": 906.336,
+        "haptic_commands": 0
+      },
+      "reported_hz_range": [
+        200.0,
+        200.01
+      ],
+      "all_observed_read_counters_clean": true,
+      "all_sample_prints_admitted": true,
+      "minimum_observed_dt_us": 4933,
+      "maximum_observed_dt_us": 5066,
+      "boot_events": 1,
+      "reset_texts": [
+        "rst:0x1 (POWERON_RESET),boot:0x13 (SPI_FAST_FLASH_BOOT)"
+      ],
+      "haptic_requested_pulses": [],
+      "completed_haptic_commands": 0,
+      "configuration_events": [
+        {
+          "type": "imu_config",
+          "node": "paddle",
+          "address": 104,
+          "ready": true,
+          "who": 68,
+          "gyro_config": 39,
+          "accel_config": 39,
+          "power": 15,
+          "verified": true
+        }
+      ],
+      "source_differences_vs_current": [
+        "DiagnosticConfig.h"
+      ],
+      "axis_ranges": {
+        "accel_g": [
+          [
+            -1.83496,
+            2.10742
+          ],
+          [
+            -7.43457,
+            4.97119
+          ],
+          [
+            -3.65186,
+            6.33545
+          ]
+        ],
+        "gyro_dps": [
+          [
+            -211.8293,
+            290.4268
+          ],
+          [
+            -756.6464,
+            686.8903
+          ],
+          [
+            -605.6097,
+            493.2927
+          ]
+        ]
+      }
+    },
+    {
+      "capture": "forearm_20261101_234051_396003",
+      "role": "forearm",
+      "duration_s": 28.089104699960444,
+      "printed_samples": 553,
+      "first_health": {
+        "type": "health",
+        "node": "forearm",
+        "ms": 11125,
+        "ready": true,
+        "attempts": 2001,
+        "good": 2001,
+        "failures": 0,
+        "consecutive": 0,
+        "max_consecutive": 0,
+        "invalid_codes": 0,
+        "saturated": 0,
+        "skipped": 0,
+        "reinitializations": 0,
+        "acquisition_hz": 200.001,
+        "min_dt_us": 4961,
+        "max_dt_us": 5022,
+        "min_norm_g": 0.60934,
+        "max_norm_g": 1.6125,
+        "max_gyro_dps": 183.764,
+        "haptic_commands": 0
+      },
+      "last_health": {
+        "type": "health",
+        "node": "forearm",
+        "ms": 38442,
+        "ready": true,
+        "attempts": 7444,
+        "good": 7444,
+        "failures": 0,
+        "consecutive": 0,
+        "max_consecutive": 0,
+        "invalid_codes": 0,
+        "saturated": 0,
+        "skipped": 0,
+        "reinitializations": 1,
+        "acquisition_hz": 200.0,
+        "min_dt_us": 4975,
+        "max_dt_us": 5023,
+        "min_norm_g": 0.51056,
+        "max_norm_g": 1.79552,
+        "max_gyro_dps": 183.764,
+        "haptic_commands": 7
+      },
+      "reported_hz_range": [
+        200.0,
+        200.004
+      ],
+      "all_observed_read_counters_clean": true,
+      "all_sample_prints_admitted": true,
+      "minimum_observed_dt_us": 4961,
+      "maximum_observed_dt_us": 5043,
+      "boot_events": 0,
+      "reset_texts": [],
+      "haptic_requested_pulses": [
+        1,
+        1,
+        1,
+        3,
+        2,
+        3,
+        2
+      ],
+      "completed_haptic_commands": 7,
+      "configuration_events": [
+        {
+          "type": "imu_config",
+          "node": "forearm",
+          "address": 104,
+          "ready": true,
+          "who": 68,
+          "gyro_config": 39,
+          "accel_config": 39,
+          "power": 15,
+          "verified": true
+        }
+      ],
+      "source_differences_vs_current": [],
+      "axis_ranges": {
+        "accel_g": [
+          [
+            -0.21973,
+            0.21289
+          ],
+          [
+            -0.16699,
+            0.31543
+          ],
+          [
+            0.83496,
+            1.26953
+          ]
+        ],
+        "gyro_dps": [
+          [
+            -66.0366,
+            129.1463
+          ],
+          [
+            -42.0732,
+            51.6463
+          ],
+          [
+            -48.9634,
+            34.6341
+          ]
+        ]
+      }
+    }
+  ],
+  "original_capture_files_unchanged": 10,
+  "production_parameters_changed": false,
+  "decision": "No further movement or haptic repeat required for the observed function check. Recommend two additional paddle reset/startup holds only to complete the requested repeatability check.",
+  "limitations": [
+    "Paddle explicit startup captured once; previous initial startup failure remains unexplained and was not reproduced.",
+    "Forearm capture begins after startup and contains one operator-requested r reinitialization, not an observed boot.",
+    "No phase marks or stationary/pose protocol labels; no calibrated accuracy or complete solder-integrity certification.",
+    "Motor actuation in these logs is software evidence; physical vibration was explicitly confirmed by user for earlier tests.",
+    "USB serial test only; battery-only, BLE and long-duration reliability not validated here."
+  ]
+}

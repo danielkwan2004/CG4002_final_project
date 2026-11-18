@@ -1,0 +1,389 @@
+{
+  "status": "JCP5a_REVIEWED_air_motion_baseline_ready_for_BLE_green_light",
+  "capture": "joint_cp5a_20261028_182134_582078",
+  "original_automatic_status": "needs_review",
+  "original_issues": [
+    "forearm: Device counter: skipped_deadlines",
+    "forearm: acquisition/validity counters need review",
+    "paddle: Device counter: skipped_deadlines",
+    "paddle: acquisition-time discontinuity without a missing sequence",
+    "paddle: acquisition/validity counters need review"
+  ],
+  "original_warnings": [
+    "forearm: Expected a fresh sequence from zero without gaps, duplicates or reordering",
+    "forearm: Finalized incoming delivery evidence is incomplete or below 100%",
+    "forearm: Input sequence loss or device-time discontinuity recorded",
+    "forearm: received gaps recorded; inspect affected windows",
+    "paddle: Expected a fresh sequence from zero without gaps, duplicates or reordering",
+    "paddle: Finalized incoming delivery evidence is incomplete or below 100%",
+    "paddle: Input sequence loss or device-time discontinuity recorded",
+    "paddle: received gaps recorded; inspect affected windows"
+  ],
+  "repeat_required": false,
+  "full_trial_repeat_required": false,
+  "clean_motion_contexts": 3,
+  "associated_active_cues": 3,
+  "cues": [
+    {
+      "cue": 1,
+      "cue_time_s": 99.83517649999703,
+      "clean_combined_context_frames": 1060,
+      "context_segment_ids": [
+        1
+      ],
+      "active_before_cue": false,
+      "active_frames_in_five_second_core": 452,
+      "first_activity_after_cue_s": 0.9453006000079256,
+      "paddle_pre_two_second_max_gyro_rms_dps": 31.389802932739258,
+      "paddle_post_three_second_peak_gyro_rms_dps": 241.7078857421875,
+      "forearm_post_three_second_peak_gyro_rms_dps": 28.710723876953125,
+      "paddle_peak_frame_id": 17786,
+      "paddle_peak_preserved": true
+    },
+    {
+      "cue": 2,
+      "cue_time_s": 108.83183640000061,
+      "clean_combined_context_frames": 1060,
+      "context_segment_ids": [
+        2,
+        3
+      ],
+      "active_before_cue": false,
+      "active_frames_in_five_second_core": 808,
+      "first_activity_after_cue_s": 0.2986407000043556,
+      "paddle_pre_two_second_max_gyro_rms_dps": 29.99850845336914,
+      "paddle_post_three_second_peak_gyro_rms_dps": 191.09193420410156,
+      "forearm_post_three_second_peak_gyro_rms_dps": 32.85147476196289,
+      "paddle_peak_frame_id": 19526,
+      "paddle_peak_preserved": true
+    },
+    {
+      "cue": 3,
+      "cue_time_s": 117.84281820000615,
+      "clean_combined_context_frames": 1060,
+      "context_segment_ids": [
+        4
+      ],
+      "active_before_cue": false,
+      "active_frames_in_five_second_core": 534,
+      "first_activity_after_cue_s": 0.9626773999988814,
+      "paddle_pre_two_second_max_gyro_rms_dps": 23.833032608032227,
+      "paddle_post_three_second_peak_gyro_rms_dps": 227.09010314941406,
+      "forearm_post_three_second_peak_gyro_rms_dps": 36.6069450378418,
+      "paddle_peak_frame_id": 21291,
+      "paddle_peak_preserved": true
+    }
+  ],
+  "stepping_alone": {
+    "frames": 2001,
+    "active": 0,
+    "unknown": 0
+  },
+  "targeted_phase": {
+    "frames": 6000,
+    "active_frames": 1794,
+    "unknown": 0
+  },
+  "nodes": {
+    "forearm": {
+      "received": 26466,
+      "acquisition_hz": 200.0020120379277,
+      "stationary": {
+        "window_s": [
+          20.844723799993517,
+          28.867881300015142
+        ],
+        "samples": 1590,
+        "coverage_passed": true,
+        "corrected_gyro_rms_dps": 0.462847426634582,
+        "limit_dps": 1.0,
+        "gyro_check_passed": true,
+        "corrected_mean_dps": [
+          0.011049432428286527,
+          -0.010478984506826291,
+          -0.0019385641969627055
+        ],
+        "stored_bias_counts": [
+          5.2125,
+          -17.525,
+          6.845
+        ]
+      },
+      "missing_samples": 35,
+      "gaps": [
+        {
+          "node": "forearm",
+          "previous_seq": 1930,
+          "next_seq": 1936,
+          "previous_time_s": 22.980882500011177,
+          "next_time_s": 23.01096550001118,
+          "missing_samples": 5
+        },
+        {
+          "node": "forearm",
+          "previous_seq": 2335,
+          "next_seq": 2346,
+          "previous_time_s": 25.00590450001119,
+          "next_time_s": 25.060962500011193,
+          "missing_samples": 10
+        },
+        {
+          "node": "forearm",
+          "previous_seq": 7240,
+          "next_seq": 7246,
+          "previous_time_s": 49.530943500010956,
+          "next_time_s": 49.56096050001096,
+          "missing_samples": 5
+        },
+        {
+          "node": "forearm",
+          "previous_seq": 22700,
+          "next_seq": 22716,
+          "previous_time_s": 126.83087850001014,
+          "next_time_s": 126.91097150001015,
+          "missing_samples": 15
+        }
+      ],
+      "acquisition_timing_before_board_hold": [
+        {
+          "seq": 0,
+          "timestamp_us": 8103124,
+          "interval_us": 0
+        },
+        {
+          "seq": 1,
+          "timestamp_us": 8106727,
+          "interval_us": 3603
+        }
+      ],
+      "skipped_deadlines": 2,
+      "first_timing_report_s": 14.369085500016809,
+      "additional_skips_after_first_report": 0,
+      "no_sequence_loss_time_discontinuities": [],
+      "finalized_delivery": {
+        "sender_attempted": 26001,
+        "sender_accepted": 26001,
+        "local_send_failures": 0,
+        "received_unique": 25966,
+        "accepted_not_received": 35,
+        "not_captured": 35,
+        "received_percent_of_attempted": 99.86538979270028,
+        "start_seq": 0,
+        "finalized_burst_ids": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "5",
+          "6",
+          "7",
+          "8",
+          "9",
+          "10",
+          "11",
+          "12",
+          "13",
+          "14",
+          "15",
+          "16",
+          "17",
+          "18",
+          "19",
+          "20",
+          "21",
+          "22",
+          "23",
+          "24",
+          "25",
+          "26"
+        ],
+        "historical_burst_ids": [],
+        "partial_burst_ids": [],
+        "pending_burst_ids": [
+          "27"
+        ],
+        "scope": "Final consistent bursts starting at/after the first observed acquisition boundary; historical and partial bursts excluded.",
+        "bursts_started": 27,
+        "unseen_burst_count": 0
+      },
+      "IMU_invalid_reads_or_recoveries": 0
+    },
+    "paddle": {
+      "received": 25396,
+      "acquisition_hz": 199.99236315079682,
+      "stationary": {
+        "window_s": [
+          20.844723799993517,
+          28.867881300015142
+        ],
+        "samples": 1585,
+        "coverage_passed": true,
+        "corrected_gyro_rms_dps": 0.10903338160677563,
+        "limit_dps": 1.0,
+        "gyro_check_passed": true,
+        "corrected_mean_dps": [
+          0.0013387704854966453,
+          -0.006179791490343921,
+          0.0028973032238208923
+        ],
+        "stored_bias_counts": [
+          1.12,
+          -7.6425,
+          6.4875
+        ]
+      },
+      "missing_samples": 35,
+      "gaps": [
+        {
+          "node": "paddle",
+          "previous_seq": 1254,
+          "next_seq": 1270,
+          "previous_time_s": 24.97510269999887,
+          "next_time_s": 25.05516969999887,
+          "missing_samples": 15
+        },
+        {
+          "node": "paddle",
+          "previous_seq": 1609,
+          "next_seq": 1615,
+          "previous_time_s": 26.750135699998864,
+          "next_time_s": 26.780168699998868,
+          "missing_samples": 5
+        },
+        {
+          "node": "paddle",
+          "previous_seq": 3579,
+          "next_seq": 3585,
+          "previous_time_s": 36.60007069999891,
+          "next_time_s": 36.63016469999891,
+          "missing_samples": 5
+        },
+        {
+          "node": "paddle",
+          "previous_seq": 21625,
+          "next_seq": 21636,
+          "previous_time_s": 126.8300706999989,
+          "next_time_s": 126.8851676999989,
+          "missing_samples": 10
+        }
+      ],
+      "acquisition_timing_before_board_hold": [
+        {
+          "seq": 0,
+          "timestamp_us": 8490976,
+          "interval_us": 0
+        },
+        {
+          "seq": 1,
+          "timestamp_us": 8503117,
+          "interval_us": 12141
+        },
+        {
+          "seq": 2,
+          "timestamp_us": 8505716,
+          "interval_us": 2599
+        }
+      ],
+      "skipped_deadlines": 1,
+      "first_timing_report_s": 19.839145800011465,
+      "additional_skips_after_first_report": 0,
+      "no_sequence_loss_time_discontinuities": [
+        {
+          "node": "paddle",
+          "previous_seq": 0,
+          "next_seq": 1,
+          "previous_time_s": 18.70033869999888,
+          "next_time_s": 18.71247969999888,
+          "interval_us": 12141
+        }
+      ],
+      "finalized_delivery": {
+        "sender_attempted": 25001,
+        "sender_accepted": 25001,
+        "local_send_failures": 0,
+        "received_unique": 24966,
+        "accepted_not_received": 35,
+        "not_captured": 35,
+        "received_percent_of_attempted": 99.860005599776,
+        "start_seq": 0,
+        "finalized_burst_ids": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "5",
+          "6",
+          "7",
+          "8",
+          "9",
+          "10",
+          "11",
+          "12",
+          "13",
+          "14",
+          "15",
+          "16",
+          "17",
+          "18",
+          "19",
+          "20",
+          "21",
+          "22",
+          "23",
+          "24",
+          "25"
+        ],
+        "historical_burst_ids": [],
+        "partial_burst_ids": [],
+        "pending_burst_ids": [
+          "26"
+        ],
+        "scope": "Final consistent bursts starting at/after the first observed acquisition boundary; historical and partial bursts excluded.",
+        "bursts_started": 26,
+        "unseen_burst_count": 0
+      },
+      "IMU_invalid_reads_or_recoveries": 0
+    }
+  },
+  "supported_hold_start_s": 19.844723799993517,
+  "all_skips_and_non_gap_timing_anomalies_before_supported_hold": true,
+  "all_input_gaps_outside_motion_contexts": true,
+  "ready_reference_unaffected": true,
+  "missing_input_samples": 70,
+  "output_records": 2066,
+  "output_samples": 2048,
+  "output_events": 18,
+  "exact_output_received": true,
+  "source_replay_and_OR_safeguard_pass": true,
+  "required_frames_preserved": 1813,
+  "original_received_inputs_preserved": 51862,
+  "normal_segment_endings": 4,
+  "output_kinds": {
+    "history": 231,
+    "live": 1794,
+    "end_boundary": 4,
+    "fallback": 19
+  },
+  "previous_output_overlap": {
+    "segment_id": 3,
+    "clipped_previous_frames": 8,
+    "remaining_history_ms": 254.958,
+    "interpretation": "Overlap remains in earlier capture2; no eviction or unaccounted short history."
+  },
+  "original_capture_files_unchanged": 78,
+  "existing_runtime_manifest_entries_unchanged": 61,
+  "existing_runtime_config_and_test_files_unchanged": 152,
+  "settings_match_original_final_trial": true,
+  "parameters_frozen": false,
+  "BLE_migration_started": false,
+  "BLE_requires_explicit_user_green_light": true,
+  "recommendation": "No further air-motion repeat. Use the unchanged reviewed candidate as the BLE migration baseline after explicit user green light.",
+  "limitations": [
+    "This is binary motion capture, not stroke classification. Physical execution is operator-reported.",
+    "Cue-to-activity offsets include human response; they do not measure detector onset latency or independently verified recall.",
+    "Startup scheduler skips are acquisition timing evidence, not proven Wi-Fi loss; retained as explained exceptions before all holds/actions.",
+    "Seventy missing incoming samples remain missing. Unknown fallback is retained; no invented samples or weakened runtime checks.",
+    "Review qualifies the tested mounted air motions. Actual ball contact and BLE end-to-end behavior are unvalidated here.",
+    "Original needs_review reports preserved. No thresholds, calibration, alpha, guard, transport or tests changed."
+  ]
+}

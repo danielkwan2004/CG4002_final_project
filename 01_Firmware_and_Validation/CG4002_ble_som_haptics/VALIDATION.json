@@ -1,0 +1,73 @@
+{
+  "date": "2026-11-07",
+  "status": "SOFTWARE_VALIDATED_PHYSICAL_BLE_HAPTIC_TEST_PENDING",
+  "source": "../CG4002_ble_som",
+  "original_files_hash_verified_unchanged": 1634,
+  "motion_sensor_files_byte_identical": 16,
+  "native_tests": {
+    "forearm": "PASS",
+    "paddle": "PASS",
+    "scope": [
+      "existing sensor/calibration/filter/recovery and local motion/history suites",
+      "actual BLE parser with full >192-byte metadata payload",
+      "exact PWM waveform and pattern order/gap",
+      "invalid pattern, disabled paddle motor, bounded queue",
+      "ACK retry does not replay motor, unsubscribe cancels motor",
+      "existing binary format/units/time, security/UUID, MTU, reconnect"
+    ]
+  },
+  "builds": {
+    "forearm": {
+      "status": "PASS",
+      "flash_bytes": 651395,
+      "static_ram_bytes": 60856,
+      "bin_sha256": "a5f3561b929a8b07b356e2311205bcd38415a8925cf6801729ed5108c0d0469d",
+      "log": "validation/haptics_build_forearm.log"
+    },
+    "paddle": {
+      "status": "PASS",
+      "flash_bytes": 650891,
+      "static_ram_bytes": 60840,
+      "bin_sha256": "2bbe2103d500e93322a03c8183148b03a930210e5a8d14e162ae12aab6fe673b",
+      "log": "validation/haptics_build_paddle.log"
+    }
+  },
+  "protocol": {
+    "haptic_cmd": 12,
+    "haptic_response": 13,
+    "patterns": [
+      "single",
+      "double",
+      "triple"
+    ],
+    "valid_ack": {
+      "type": 13,
+      "status": "OK"
+    },
+    "error_reasons": [
+      "invalid_pattern",
+      "no_motor",
+      "busy"
+    ],
+    "metadata": "accepted, not used for scheduling or deduplication"
+  },
+  "haptics": {
+    "enabled_node": "forearm",
+    "pin": 25,
+    "duty": 255,
+    "pulse_ms": 150,
+    "double_gap_ms": 250,
+    "triple_gap_ms": 100,
+    "between_patterns_ms": 100,
+    "waiting_slots": 4,
+    "playback": "non-blocking main loop",
+    "disconnect": "cancel active and waiting"
+  },
+  "long_write": "Existing MTU185 retained; client must use ATT long write or suitably larger negotiated MTU for full JSON; no application fragmentation added.",
+  "hardware_flashed_by_agent": false,
+  "physical_BLE_motor_test": "PENDING: HAPTIC_BLE_TEST.md",
+  "inherited_artifacts": "BASELINE_VALIDATION.json and non-haptics build logs/checkpoints are historical copies, not validation of this extension.",
+  "build_target": "esp32:esp32:dfrobot_firebeetle2_esp32e",
+  "ESP32_core": "3.3.11",
+  "NimBLE_Arduino": "2.5.1"
+}
